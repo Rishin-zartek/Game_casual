@@ -1230,7 +1230,7 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
             // ElevenLabs Speech-to-Text Realtime WebSocket API (Scribe v2)
             // Based on: https://elevenlabs.io/docs/developers/guides/cookbooks/speech-to-text/streaming
             // For Scribe v2, use /realtime endpoint with model_id and token as query parameters
-            const modelId = "scribe_v2";
+            const modelId = "scribe_v2_realtime";
             const wsUrl = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=${modelId}&token=${encodeURIComponent(this.apiKey)}`;
             
             loadingLogger.log('info', 'Connecting to ElevenLabs Scribe v2 WebSocket...');
