@@ -172,6 +172,32 @@
                     </div>
                 </div>
                 
+                <div class="settings-section">
+                    <h3>Debug & Logs</h3>
+                    <div class="setting-item">
+                        <div class="setting-label">
+                            <span class="setting-emoji">📋</span>
+                            <span>Show Logs Panel</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="show-logs-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div id="logs-filter-section" class="logs-filter-section" style="display: none;">
+                        <div class="log-filters">
+                            <button class="log-filter-btn active" data-level="all">All</button>
+                            <button class="log-filter-btn active" data-level="info">ℹ️ Info</button>
+                            <button class="log-filter-btn active" data-level="success">✅ Success</button>
+                            <button class="log-filter-btn active" data-level="warning">⚠️ Warning</button>
+                            <button class="log-filter-btn active" data-level="error">❌ Error</button>
+                        </div>
+                        <button id="clear-logs-settings-btn" class="btn secondary-btn" style="margin-top: 8px; width: 100%; padding: 8px;">
+                            Clear Logs
+                        </button>
+                    </div>
+                </div>
+                
                 <div class="settings-section danger-zone">
                     <h3>Data Management</h3>
                     <button id="clear-data-btn" class="btn danger-btn">
@@ -286,6 +312,15 @@
                 </button>
             </div>
         </div>
+    </div>
+
+    <!-- Persistent Logs Panel (always accessible) -->
+    <div id="persistent-logs-panel" class="persistent-logs-panel">
+        <div class="persistent-logs-header">
+            <span>📋 Debug Logs</span>
+            <button id="close-persistent-logs" class="close-logs-btn">✕</button>
+        </div>
+        <div id="persistent-logs-content" class="persistent-logs-content"></div>
     </div>
 
     <script src="game.js"></script>

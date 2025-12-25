@@ -76,6 +76,11 @@ class LoadingLogger {
         this.logsContent = null;
         this.showLogsBtn = null;
         this.isExpanded = false;
+        this.persistentLogsPanel = null;
+        this.persistentLogsContent = null;
+        this.showLogsToggle = null;
+        this.enabledLevels = new Set(['info', 'success', 'warning', 'error']);
+        this.isPersistentPanelVisible = false;
     }
     
     init() {
@@ -83,6 +88,14 @@ class LoadingLogger {
         this.logsContent = document.getElementById('logs-content');
         this.showLogsBtn = document.getElementById('show-logs-btn');
         const clearLogsBtn = document.getElementById('clear-logs-btn');
+        
+        // Persistent logs panel (always accessible)
+        this.persistentLogsPanel = document.getElementById('persistent-logs-panel');
+        this.persistentLogsContent = document.getElementById('persistent-logs-content');
+        const closePersistentLogsBtn = document.getElementById('close-persistent-logs');
+        this.showLogsToggle = document.getElementById('show-logs-toggle');
+        const logsFilterSection = document.getElementById('logs-filter-section');
+        const clearLogsSettingsBtn = document.getElementById('clear-logs-settings-btn');
         
         if (this.showLogsBtn) {
             this.showLogsBtn.addEventListener('click', () => this.toggleLogs());
@@ -92,8 +105,127 @@ class LoadingLogger {
             clearLogsBtn.addEventListener('click', () => this.clearLogs());
         }
         
+        if (closePersistentLogsBtn) {
+            closePersistentLogsBtn.addEventListener('click', () => this.hidePersistentLogs());
+        }
+        
+        if (this.showLogsToggle) {
+            // Load saved preference
+            const saved = localStorage.getItem('showLogsPanel');
+            if (saved === 'true') {
+                this.showLogsToggle.checked = true;
+                this.showPersistentLogs();
+            }
+            
+            this.showLogsToggle.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    this.showPersistentLogs();
+                    localStorage.setItem('showLogsPanel', 'true');
+                } else {
+                    this.hidePersistentLogs();
+                    localStorage.setItem('showLogsPanel', 'false');
+                }
+            });
+        }
+        
+        // Log level filters
+        const filterBtns = document.querySelectorAll('.log-filter-btn');
+        filterBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const level = btn.dataset.level;
+                btn.classList.toggle('active');
+                
+                if (level === 'all') {
+                    // Toggle all filters
+                    const allActive = btn.classList.contains('active');
+                    filterBtns.forEach(b => {
+                        if (b.dataset.level !== 'all') {
+                            if (allActive) {
+                                b.classList.add('active');
+                                this.enabledLevels.add(b.dataset.level);
+                            } else {
+                                b.classList.remove('active');
+                                this.enabledLevels.delete(b.dataset.level);
+                            }
+                        }
+                    });
+                } else {
+                    if (btn.classList.contains('active')) {
+                        this.enabledLevels.add(level);
+                    } else {
+                        this.enabledLevels.delete(level);
+                    }
+                }
+                
+                this.refreshLogsDisplay();
+            });
+        });
+        
+        if (clearLogsSettingsBtn) {
+            clearLogsSettingsBtn.addEventListener('click', () => this.clearLogs());
+        }
+        
+        // Show filter section when toggle is checked
+        if (this.showLogsToggle && logsFilterSection) {
+            this.showLogsToggle.addEventListener('change', () => {
+                logsFilterSection.style.display = this.showLogsToggle.checked ? 'block' : 'none';
+            });
+            if (this.showLogsToggle.checked) {
+                logsFilterSection.style.display = 'block';
+            }
+        }
+        
         // Log initial browser info
         this.logBrowserInfo();
+    }
+    
+    showPersistentLogs() {
+        if (this.persistentLogsPanel) {
+            this.persistentLogsPanel.classList.add('visible');
+            this.isPersistentPanelVisible = true;
+            this.refreshLogsDisplay();
+        }
+    }
+    
+    hidePersistentLogs() {
+        if (this.persistentLogsPanel) {
+            this.persistentLogsPanel.classList.remove('visible');
+            this.isPersistentPanelVisible = false;
+        }
+    }
+    
+    refreshLogsDisplay() {
+        if (!this.persistentLogsContent) return;
+        
+        // Clear and re-render all logs based on enabled levels
+        this.persistentLogsContent.innerHTML = '';
+        
+        this.logs.forEach(entry => {
+            if (this.enabledLevels.has(entry.type) || this.enabledLevels.has('all')) {
+                this.renderLogToElement(entry, this.persistentLogsContent);
+            }
+        });
+        
+        this.persistentLogsContent.scrollTop = this.persistentLogsContent.scrollHeight;
+    }
+    
+    renderLogToElement(entry, container) {
+        const icons = {
+            info: 'ℹ️',
+            success: '✅',
+            warning: '⚠️',
+            error: '❌'
+        };
+        
+        const logEl = document.createElement('div');
+        logEl.className = `log-entry ${entry.type}`;
+        logEl.innerHTML = `
+            <span class="log-time">${entry.time}s</span>
+            <span class="log-icon">${icons[entry.type] || 'ℹ️'}</span>
+            <span class="log-message">${entry.message}</span>
+        `;
+        
+        container.appendChild(logEl);
     }
     
     logBrowserInfo() {
@@ -127,25 +259,19 @@ class LoadingLogger {
     }
     
     renderLog(entry) {
-        if (!this.logsContent) return;
+        // Render to loading overlay logs
+        if (this.logsContent) {
+            this.renderLogToElement(entry, this.logsContent);
+            this.logsContent.scrollTop = this.logsContent.scrollHeight;
+        }
         
-        const icons = {
-            info: 'ℹ️',
-            success: '✅',
-            warning: '⚠️',
-            error: '❌'
-        };
-        
-        const logEl = document.createElement('div');
-        logEl.className = `log-entry ${entry.type}`;
-        logEl.innerHTML = `
-            <span class="log-time">${entry.time}s</span>
-            <span class="log-icon">${icons[entry.type] || 'ℹ️'}</span>
-            <span class="log-message">${entry.message}</span>
-        `;
-        
-        this.logsContent.appendChild(logEl);
-        this.logsContent.scrollTop = this.logsContent.scrollHeight;
+        // Render to persistent logs panel if visible and level enabled
+        if (this.isPersistentPanelVisible && this.persistentLogsContent) {
+            if (this.enabledLevels.has(entry.type) || this.enabledLevels.has('all')) {
+                this.renderLogToElement(entry, this.persistentLogsContent);
+                this.persistentLogsContent.scrollTop = this.persistentLogsContent.scrollHeight;
+            }
+        }
     }
     
     toggleLogs() {
@@ -164,6 +290,9 @@ class LoadingLogger {
         this.startTime = Date.now();
         if (this.logsContent) {
             this.logsContent.innerHTML = '';
+        }
+        if (this.persistentLogsContent) {
+            this.persistentLogsContent.innerHTML = '';
         }
         this.logBrowserInfo();
     }
@@ -343,6 +472,14 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                 
                 try {
                     const inputData = event.inputBuffer.getChannelData(0);
+                    
+                    // Check if we're getting audio data
+                    const hasAudio = inputData.some(sample => Math.abs(sample) > 0.01);
+                    if (!this.audioStarted && hasAudio) {
+                        loadingLogger.log('success', 'Audio input detected - microphone is working');
+                        this.audioStarted = true;
+                    }
+                    
                     // Convert Float32Array to Int16Array for Google Cloud API
                     const int16Data = new Int16Array(inputData.length);
                     for (let i = 0; i < inputData.length; i++) {
@@ -354,14 +491,20 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                     this.sendAudioChunk(int16Data);
                 } catch (error) {
                     console.error('Audio processing failed', error);
+                    loadingLogger.log('error', `Audio processing error: ${error.message}`);
                 }
             };
+            
+            this.audioStarted = false;
+            loadingLogger.log('info', 'Audio processor configured');
             
             // Connect nodes
             this.sourceNode.connect(this.processorNode);
             this.processorNode.connect(this.audioContext.destination);
             
             this.isListening = true;
+            loadingLogger.log('success', 'Google Cloud STT streaming recognition started');
+            loadingLogger.log('info', 'Waiting for audio input and API responses...');
             if (this.onStart) this.onStart();
             console.log('Google Cloud STT streaming recognition started');
             
@@ -373,8 +516,13 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
     
     async startStreamingRPC() {
         try {
+            loadingLogger.log('info', '=== Starting Streaming RPC Connection ===');
+            loadingLogger.log('info', `API Key present: ${!!this.apiKey && this.apiKey.length > 0}`);
+            loadingLogger.log('info', `API Key length: ${this.apiKey ? this.apiKey.length : 0} characters`);
+            
             // Use streaming recognize endpoint - this uses HTTP/2 streaming for low latency
             const url = `https://speech.googleapis.com/v1/speech:streamingrecognize?key=${encodeURIComponent(this.apiKey)}`;
+            loadingLogger.log('info', `Connecting to: ${url.substring(0, 50)}...`);
             
             // Create a ReadableStream for sending audio data
             const stream = new ReadableStream({
@@ -393,10 +541,13 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                     const configJson = JSON.stringify(configMessage) + '\n';
                     controller.enqueue(new TextEncoder().encode(configJson));
                     this.configSent = true;
-                    loadingLogger.log('info', 'Streaming RPC config sent');
-                    console.log('Sent streaming config');
+                    loadingLogger.log('success', 'Streaming RPC config sent');
+                    loadingLogger.log('info', `Config: ${JSON.stringify(this.recognitionConfig)}`);
+                    console.log('Sent streaming config:', configMessage);
                 }
             });
+            
+            loadingLogger.log('info', 'Initiating fetch request...');
             
             // Start the streaming request with HTTP/2
             this.streamingRequest = await fetch(url, {
@@ -410,16 +561,24 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                 cache: 'no-cache',
             });
             
+            loadingLogger.log('info', `Fetch response status: ${this.streamingRequest.status} ${this.streamingRequest.statusText}`);
+            
             if (!this.streamingRequest.ok) {
                 const errorText = await this.streamingRequest.text();
+                loadingLogger.log('error', `HTTP Error ${this.streamingRequest.status}: ${errorText.substring(0, 200)}`);
                 let errorData;
                 try {
                     errorData = JSON.parse(errorText);
+                    loadingLogger.log('error', `Parsed error: ${JSON.stringify(errorData)}`);
                 } catch (e) {
                     errorData = { error: { message: errorText || `HTTP ${this.streamingRequest.status}` } };
+                    loadingLogger.log('error', `Could not parse error response: ${e.message}`);
                 }
                 throw new Error(errorData.error?.message || `Streaming API error: ${this.streamingRequest.status}`);
             }
+            
+            loadingLogger.log('success', 'Streaming RPC connection established');
+            loadingLogger.log('info', 'Starting to read response stream...');
             
             // Read responses from the stream (newline-delimited JSON)
             this.reader = this.streamingRequest.body.getReader();
@@ -428,6 +587,7 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
         } catch (error) {
             console.error('Failed to start streaming RPC:', error);
             loadingLogger.log('error', `Streaming RPC failed: ${error.message}`);
+            loadingLogger.log('error', `Error stack: ${error.stack || 'No stack trace'}`);
             if (this.onError) {
                 if (error.message.includes('API key') || error.message.includes('403') || error.message.includes('401')) {
                     this.onError(new Error('Invalid API key. Please check your Google Cloud API key in settings.'));
@@ -440,21 +600,27 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
     
     async readStream() {
         let buffer = '';
+        let chunkCount = 0;
         
         try {
+            loadingLogger.log('info', 'Stream reader started, waiting for responses...');
+            
             while (this.isListening && this.reader) {
                 const { done, value } = await this.reader.read();
                 
                 if (done) {
+                    loadingLogger.log('warning', 'Stream ended (reader returned done=true)');
                     console.log('Stream ended');
                     // Process any remaining buffer
                     if (buffer.trim()) {
                         const lines = buffer.split('\n').filter(line => line.trim());
+                        loadingLogger.log('info', `Processing ${lines.length} remaining lines from buffer`);
                         for (const line of lines) {
                             try {
                                 const response = JSON.parse(line);
                                 this.handleStreamResponse(response);
                             } catch (e) {
+                                loadingLogger.log('error', `Failed to parse final buffer: ${e.message}`);
                                 console.error('Failed to parse final buffer:', e);
                             }
                         }
@@ -462,8 +628,14 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                     break;
                 }
                 
+                chunkCount++;
+                if (chunkCount === 1) {
+                    loadingLogger.log('success', 'Received first chunk from stream');
+                }
+                
                 // Accumulate chunks and parse newline-delimited JSON
-                buffer += new TextDecoder().decode(value, { stream: true });
+                const decoded = new TextDecoder().decode(value, { stream: true });
+                buffer += decoded;
                 const lines = buffer.split('\n');
                 
                 // Keep the last incomplete line in buffer
@@ -474,16 +646,22 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                     if (line.trim()) {
                         try {
                             const response = JSON.parse(line);
+                            loadingLogger.log('info', `Received response: ${JSON.stringify(response).substring(0, 100)}...`);
                             this.handleStreamResponse(response);
                         } catch (e) {
+                            loadingLogger.log('error', `Failed to parse stream response: ${e.message}`);
+                            loadingLogger.log('error', `Problematic line: ${line.substring(0, 200)}`);
                             console.error('Failed to parse stream response:', e, 'Line:', line);
                         }
                     }
                 }
             }
+            
+            loadingLogger.log('info', `Stream reading completed. Processed ${chunkCount} chunks.`);
         } catch (error) {
             console.error('Error reading stream:', error);
             loadingLogger.log('error', `Stream read error: ${error.message}`);
+            loadingLogger.log('error', `Error stack: ${error.stack || 'No stack trace'}`);
             if (this.onError && this.isListening) {
                 this.onError(error);
             }
@@ -491,9 +669,12 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
     }
     
     handleStreamResponse(response) {
+        loadingLogger.log('info', `Processing stream response: ${JSON.stringify(response).substring(0, 150)}...`);
+        
         if (response.error) {
             console.error('Stream error:', response.error);
             loadingLogger.log('error', `Stream error: ${response.error.message || 'Unknown error'}`);
+            loadingLogger.log('error', `Full error: ${JSON.stringify(response.error)}`);
             if (this.onError) {
                 this.onError(new Error(response.error.message || 'Streaming error'));
             }
@@ -501,9 +682,15 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
         }
         
         if (response.results && response.results.length > 0) {
+            loadingLogger.log('success', `Received ${response.results.length} result(s) from API`);
+            
             for (const result of response.results) {
+                loadingLogger.log('info', `Result details: isFinalAlternative=${result.isFinalAlternative}, stability=${result.stability}`);
+                
                 if (result.alternatives && result.alternatives.length > 0) {
                     const alternative = result.alternatives[0];
+                    loadingLogger.log('info', `Alternative confidence: ${alternative.confidence || 'N/A'}`);
+                    
                     if (alternative.transcript) {
                         const transcript = alternative.transcript.trim();
                         // Check if this is a final result
@@ -511,17 +698,31 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                         
                         if (transcript && this.onResult) {
                             console.log(`Google Cloud STT ${isFinal ? 'final' : 'interim'} result:`, transcript);
-                            loadingLogger.log('info', `Received ${isFinal ? 'final' : 'interim'} transcript: ${transcript}`);
+                            loadingLogger.log('success', `✅ ${isFinal ? 'FINAL' : 'INTERIM'} transcript: "${transcript}"`);
                             this.onResult(transcript, isFinal);
+                        } else {
+                            loadingLogger.log('warning', 'Transcript empty or onResult callback not set');
                         }
+                    } else {
+                        loadingLogger.log('warning', 'No transcript in alternative');
                     }
+                } else {
+                    loadingLogger.log('warning', 'No alternatives in result');
                 }
             }
+        } else {
+            loadingLogger.log('info', 'Response received but no results yet (normal for streaming)');
         }
     }
     
     sendAudioChunk(audioData) {
         if (!this.streamController || !this.configSent || !this.isListening) {
+            if (!this.streamController) {
+                loadingLogger.log('warning', 'Cannot send audio: streamController not available');
+            }
+            if (!this.configSent) {
+                loadingLogger.log('warning', 'Cannot send audio: config not sent yet');
+            }
             return;
         }
         
@@ -536,6 +737,13 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             
             const audioJson = JSON.stringify(audioMessage) + '\n';
             this.streamController.enqueue(new TextEncoder().encode(audioJson));
+            
+            // Log periodically (every 50 chunks to avoid spam)
+            if (!this.audioChunkCount) this.audioChunkCount = 0;
+            this.audioChunkCount++;
+            if (this.audioChunkCount % 50 === 0) {
+                loadingLogger.log('info', `Sent ${this.audioChunkCount} audio chunks (${audioData.length} samples each)`);
+            }
         } catch (error) {
             console.error('Failed to send audio chunk:', error);
             loadingLogger.log('error', `Failed to send audio chunk: ${error.message}`);
@@ -1103,20 +1311,26 @@ function loadSettings() {
 function saveSettingsToStorage() {
     try {
         const apiKeyInput = document.getElementById('google-cloud-api-key');
+        const apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
         const settings = {
             guessTime: parseInt(elements.guessTimeInput.value) || 3,
             voiceTime: parseInt(elements.voiceTimeInput.value) || 10,
             speechEngine: elements.speechEngineInput.value || 'googlecloud',
-            googleCloudApiKey: apiKeyInput ? apiKeyInput.value.trim() : ''
+            googleCloudApiKey: apiKey
         };
         localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
         
         // Update API key in engine
         if (settings.googleCloudApiKey) {
             speechEngine.setApiKey(settings.googleCloudApiKey);
+            loadingLogger.log('success', `API key saved (${apiKey.length} characters)`);
+            loadingLogger.log('info', `API key starts with: ${apiKey.substring(0, 10)}...`);
+        } else {
+            loadingLogger.log('warning', 'API key cleared');
         }
     } catch (e) {
         console.log('Could not save settings:', e);
+        loadingLogger.log('error', `Failed to save settings: ${e.message}`);
     }
 }
 
