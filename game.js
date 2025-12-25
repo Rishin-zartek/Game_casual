@@ -1072,6 +1072,7 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
     constructor() {
         super();
         this.apiKey = null;
+        this.token = null;
         this.audioContext = null;
         this.mediaStream = null;
         this.sourceNode = null;
@@ -1086,6 +1087,84 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
     
     setApiKey(apiKey) {
         this.apiKey = apiKey;
+        // Clear token when API key changes
+        this.token = null;
+    }
+    
+    async createToken() {
+        if (!this.apiKey || this.apiKey.trim().length === 0) {
+            throw new Error('API key required to create token');
+        }
+        
+        // If we already have a valid token, reuse it
+        if (this.token) {
+            loadingLogger.log('info', 'Reusing existing ElevenLabs token');
+            return this.token;
+        }
+        
+        loadingLogger.log('info', 'Creating ElevenLabs token...');
+        
+        try {
+            const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text/realtime/token', {
+                method: 'POST',
+                headers: {
+                    'xi-api-key': this.apiKey,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                let errorMessage = `Failed to create token: ${response.status} ${response.statusText}`;
+                try {
+                    const errorJson = JSON.parse(errorText);
+                    if (errorJson.detail && typeof errorJson.detail === 'string') {
+                        errorMessage = errorJson.detail;
+                    } else if (errorJson.message) {
+                        errorMessage = errorJson.message;
+                    }
+                } catch (e) {
+                    // If parsing fails, use the error text if available
+                    if (errorText) {
+                        errorMessage = errorText;
+                    }
+                }
+                
+                if (response.status === 401 || response.status === 403) {
+                    errorMessage = 'Invalid API key. Please check your ElevenLabs API key in settings.';
+                }
+                
+                loadingLogger.log('error', `Token creation failed: ${errorMessage}`);
+                throw new Error(errorMessage);
+            }
+            
+            const data = await response.json();
+            
+            // Extract token from response
+            // The token might be in different fields depending on API version
+            // Handle both object responses and string responses
+            let token;
+            if (typeof data === 'string') {
+                token = data;
+            } else if (data && typeof data === 'object') {
+                token = data.token || data.realtime_token || data.access_token || data.token_value;
+            } else {
+                throw new Error('Invalid token response format');
+            }
+            
+            if (!token || typeof token !== 'string' || token.trim().length === 0) {
+                throw new Error('Invalid token response format: token is not a valid string');
+            }
+            
+            this.token = token;
+            loadingLogger.log('success', 'ElevenLabs token created successfully');
+            return this.token;
+            
+        } catch (error) {
+            const errorMessage = error?.message || error?.toString() || 'Unknown error';
+            loadingLogger.log('error', `Token creation error: ${errorMessage}`);
+            throw error;
+        }
     }
     
     isAvailable() {
@@ -1229,9 +1308,14 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
         try {
             // ElevenLabs Speech-to-Text Realtime WebSocket API (Scribe v2)
             // Based on: https://elevenlabs.io/docs/developers/guides/cookbooks/speech-to-text/streaming
+            // Step 1: Create a token first (required before connecting)
+            loadingLogger.log('info', 'Creating token for ElevenLabs WebSocket connection...');
+            const token = await this.createToken();
+            
+            // Step 2: Connect to WebSocket using the token
             // For Scribe v2, use /realtime endpoint with model_id and token as query parameters
             const modelId = "scribe_v2_realtime";
-            const wsUrl = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=${modelId}&token=${encodeURIComponent(this.apiKey)}`;
+            const wsUrl = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=${modelId}&token=${encodeURIComponent(token)}`;
             
             loadingLogger.log('info', 'Connecting to ElevenLabs Scribe v2 WebSocket...');
             
