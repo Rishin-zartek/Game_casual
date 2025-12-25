@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎬 Emoji Movie Guessing Game</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="game-container">
+        <!-- Start Screen -->
+        <div id="start-screen" class="screen active">
+            <div class="logo">🎬🎭🎥</div>
+            <h1>Emoji Movie Quiz</h1>
+            <p class="tagline">Guess the movie from emojis using your voice!</p>
+            
+            <div class="settings-panel">
+                <h3>⚙️ Game Settings</h3>
+                <div class="setting-row">
+                    <label for="guess-time">Think Time (seconds):</label>
+                    <input type="number" id="guess-time" value="5" min="3" max="15">
+                </div>
+                <div class="setting-row">
+                    <label for="voice-time">Voice Time (seconds):</label>
+                    <input type="number" id="voice-time" value="5" min="3" max="15">
+                </div>
+            </div>
+            
+            <button id="start-btn" class="btn primary-btn">
+                <span class="btn-icon">🎮</span>
+                Start Game
+            </button>
+            
+            <div class="instructions">
+                <h4>How to Play:</h4>
+                <ol>
+                    <li>🧠 Look at the emojis and think of the movie</li>
+                    <li>🎤 When prompted, speak the movie name</li>
+                    <li>⚡ Be quick - you're racing against time!</li>
+                    <li>🏆 Score points for correct answers</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Game Screen -->
+        <div id="game-screen" class="screen">
+            <div class="game-header">
+                <div class="score-display">
+                    <span class="score-label">Score</span>
+                    <span id="score" class="score-value">0</span>
+                </div>
+                <div class="question-counter">
+                    <span id="current-question">1</span> / <span id="total-questions">10</span>
+                </div>
+                <div class="timer-display">
+                    <span class="timer-label" id="phase-label">Think</span>
+                    <span id="timer" class="timer-value">5</span>
+                </div>
+            </div>
+
+            <div class="emoji-display">
+                <div id="emojis" class="emojis"></div>
+            </div>
+
+            <div class="phase-indicator">
+                <div id="phase-icon" class="phase-icon thinking">🧠</div>
+                <p id="phase-text" class="phase-text">Study the emojis...</p>
+            </div>
+
+            <div class="voice-section">
+                <div id="mic-indicator" class="mic-indicator">
+                    <div class="mic-icon">🎤</div>
+                    <div class="sound-waves">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
+                <p id="recognized-text" class="recognized-text"></p>
+            </div>
+
+            <div id="feedback" class="feedback"></div>
+        </div>
+
+        <!-- Results Screen -->
+        <div id="results-screen" class="screen">
+            <div class="results-content">
+                <div class="trophy">🏆</div>
+                <h2>Game Over!</h2>
+                <div class="final-score">
+                    <span class="final-score-label">Final Score</span>
+                    <span id="final-score" class="final-score-value">0</span>
+                    <span class="final-score-total">/ <span id="max-score">100</span></span>
+                </div>
+                
+                <div class="results-breakdown">
+                    <div class="result-stat correct">
+                        <span class="stat-icon">✅</span>
+                        <span id="correct-count">0</span>
+                        <span class="stat-label">Correct</span>
+                    </div>
+                    <div class="result-stat incorrect">
+                        <span class="stat-icon">❌</span>
+                        <span id="incorrect-count">0</span>
+                        <span class="stat-label">Incorrect</span>
+                    </div>
+                    <div class="result-stat timeout">
+                        <span class="stat-icon">⏱️</span>
+                        <span id="timeout-count">0</span>
+                        <span class="stat-label">Timeout</span>
+                    </div>
+                </div>
+
+                <div class="performance-message" id="performance-message"></div>
+
+                <div class="answers-review">
+                    <h3>📋 Review Answers</h3>
+                    <div id="answers-list" class="answers-list"></div>
+                </div>
+
+                <button id="play-again-btn" class="btn primary-btn">
+                    <span class="btn-icon">🔄</span>
+                    Play Again
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
