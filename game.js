@@ -227,19 +227,22 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
         this.processorNode = null;
         this.isInitialized = false;
         this.isLoading = false;
-        this.audioChunks = [];
-        this.isProcessing = false;
+        this.streamingRequest = null;
+        this.reader = null;
+        this.audioBuffer = [];
+        this.configSent = false;
         this.recognitionConfig = {
             encoding: 'LINEAR16',
             sampleRateHertz: 16000,
             languageCode: 'en-US',
             enableAutomaticPunctuation: false,
             model: 'default',
-            useEnhanced: false
+            useEnhanced: false,
+            enableInterimResults: true
         };
     }
     
-    getName() { return 'Google Cloud STT (Online)'; }
+    getName() { return 'Google Cloud STT (Streaming RPC)'; }
     
     setApiKey(apiKey) {
         this.apiKey = apiKey;
@@ -262,7 +265,7 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
         }
         
         this.isLoading = true;
-        loadingLogger.log('info', '=== Starting Google Cloud STT Initialization ===');
+        loadingLogger.log('info', '=== Starting Google Cloud STT Streaming RPC Initialization ===');
         
         try {
             // Step 1: Check API key
@@ -273,16 +276,16 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             }
             loadingLogger.log('success', 'API key found');
             
-            if (onProgress) onProgress('Initializing Google Cloud STT...', 50);
+            if (onProgress) onProgress('Initializing streaming RPC...', 50);
             
-            // Step 2: Test API connectivity (optional - can skip for faster startup)
-            loadingLogger.log('info', 'Step 2: Google Cloud STT ready');
+            // Step 2: Streaming RPC ready
+            loadingLogger.log('info', 'Step 2: Streaming RPC ready');
             
             if (onProgress) onProgress('Ready!', 100);
             
             this.isInitialized = true;
             this.isLoading = false;
-            loadingLogger.log('success', '=== Google Cloud STT Initialization Complete ===');
+            loadingLogger.log('success', '=== Google Cloud STT Streaming RPC Initialization Complete ===');
             return true;
             
         } catch (error) {
@@ -305,7 +308,7 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
         }
         
         try {
-            console.log('Starting Google Cloud STT recognition...');
+            console.log('Starting Google Cloud STT streaming recognition...');
             
             // Get microphone access
             this.mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -329,10 +332,13 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             // Create script processor for audio processing
             this.processorNode = this.audioContext.createScriptProcessor(4096, 1, 1);
             
-            this.audioChunks = [];
-            this.isProcessing = false;
+            this.audioBuffer = [];
+            this.configSent = false;
             
-            this.processorNode.onaudioprocess = async (event) => {
+            // Start streaming RPC connection
+            await this.startStreamingRPC();
+            
+            this.processorNode.onaudioprocess = (event) => {
                 if (!this.isListening) return;
                 
                 try {
@@ -344,8 +350,8 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                         int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                     }
                     
-                    // Send audio chunk to Google Cloud STT
-                    await this.sendAudioChunk(int16Data);
+                    // Send audio chunk via streaming RPC
+                    this.sendAudioChunk(int16Data);
                 } catch (error) {
                     console.error('Audio processing failed', error);
                 }
@@ -357,7 +363,7 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             
             this.isListening = true;
             if (this.onStart) this.onStart();
-            console.log('Google Cloud STT recognition started');
+            console.log('Google Cloud STT streaming recognition started');
             
         } catch (error) {
             console.error('Failed to start Google Cloud STT recognition:', error);
@@ -365,87 +371,174 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
         }
     }
     
-    async sendAudioChunk(audioData) {
-        // Collect audio chunks
-        this.audioChunks.push(...Array.from(audioData));
-        
-        // Send recognition request every ~1 second of audio (16000 samples = 1 second at 16kHz)
-        if (this.audioChunks.length >= 16000 && !this.isProcessing) {
-            this.isProcessing = true;
-            const chunksToSend = this.audioChunks.splice(0, 16000); // Take first second
-            this.processAudioChunks(chunksToSend);
+    async startStreamingRPC() {
+        try {
+            // Use streaming recognize endpoint - this uses HTTP/2 streaming for low latency
+            const url = `https://speech.googleapis.com/v1/speech:streamingrecognize?key=${encodeURIComponent(this.apiKey)}`;
+            
+            // Create a ReadableStream for sending audio data
+            const stream = new ReadableStream({
+                start: (controller) => {
+                    this.streamController = controller;
+                    
+                    // Send initial config message (newline-delimited JSON)
+                    const configMessage = {
+                        streamingConfig: {
+                            config: this.recognitionConfig,
+                            interimResults: true,
+                            singleUtterance: false
+                        }
+                    };
+                    
+                    const configJson = JSON.stringify(configMessage) + '\n';
+                    controller.enqueue(new TextEncoder().encode(configJson));
+                    this.configSent = true;
+                    loadingLogger.log('info', 'Streaming RPC config sent');
+                    console.log('Sent streaming config');
+                }
+            });
+            
+            // Start the streaming request with HTTP/2
+            this.streamingRequest = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                body: stream,
+                // Don't cache streaming requests
+                cache: 'no-cache',
+            });
+            
+            if (!this.streamingRequest.ok) {
+                const errorText = await this.streamingRequest.text();
+                let errorData;
+                try {
+                    errorData = JSON.parse(errorText);
+                } catch (e) {
+                    errorData = { error: { message: errorText || `HTTP ${this.streamingRequest.status}` } };
+                }
+                throw new Error(errorData.error?.message || `Streaming API error: ${this.streamingRequest.status}`);
+            }
+            
+            // Read responses from the stream (newline-delimited JSON)
+            this.reader = this.streamingRequest.body.getReader();
+            this.readStream();
+            
+        } catch (error) {
+            console.error('Failed to start streaming RPC:', error);
+            loadingLogger.log('error', `Streaming RPC failed: ${error.message}`);
+            if (this.onError) {
+                if (error.message.includes('API key') || error.message.includes('403') || error.message.includes('401')) {
+                    this.onError(new Error('Invalid API key. Please check your Google Cloud API key in settings.'));
+                } else {
+                    this.onError(error);
+                }
+            }
         }
     }
     
-    async processAudioChunks(audioChunks) {
+    async readStream() {
+        let buffer = '';
+        
         try {
-            // Convert Int16Array to base64
-            const int16Array = new Int16Array(audioChunks);
-            const base64Audio = this.int16ToBase64(int16Array);
-            
-            // Use Google Cloud Speech-to-Text REST API
-            const response = await fetch(
-                `https://speech.googleapis.com/v1/speech:recognize?key=${encodeURIComponent(this.apiKey)}`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        config: {
-                            ...this.recognitionConfig,
-                            enableAutomaticPunctuation: false,
-                            enableWordTimeOffsets: false
-                        },
-                        audio: {
-                            content: base64Audio
+            while (this.isListening && this.reader) {
+                const { done, value } = await this.reader.read();
+                
+                if (done) {
+                    console.log('Stream ended');
+                    // Process any remaining buffer
+                    if (buffer.trim()) {
+                        const lines = buffer.split('\n').filter(line => line.trim());
+                        for (const line of lines) {
+                            try {
+                                const response = JSON.parse(line);
+                                this.handleStreamResponse(response);
+                            } catch (e) {
+                                console.error('Failed to parse final buffer:', e);
+                            }
                         }
-                    })
+                    }
+                    break;
                 }
-            );
-            
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                const errorMsg = errorData.error?.message || `API error: ${response.status}`;
-                throw new Error(errorMsg);
-            }
-            
-            const result = await response.json();
-            
-            if (result.results && result.results.length > 0) {
-                const alternative = result.results[0].alternatives[0];
-                if (alternative && alternative.transcript) {
-                    const transcript = alternative.transcript.trim();
-                    // Google Cloud REST API returns final results
-                    const isFinal = true;
-                    
-                    if (transcript && this.onResult) {
-                        console.log(`Google Cloud STT result:`, transcript);
-                        this.onResult(transcript, isFinal);
+                
+                // Accumulate chunks and parse newline-delimited JSON
+                buffer += new TextDecoder().decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                
+                // Keep the last incomplete line in buffer
+                buffer = lines.pop() || '';
+                
+                // Process complete lines
+                for (const line of lines) {
+                    if (line.trim()) {
+                        try {
+                            const response = JSON.parse(line);
+                            this.handleStreamResponse(response);
+                        } catch (e) {
+                            console.error('Failed to parse stream response:', e, 'Line:', line);
+                        }
                     }
                 }
             }
-            
-            this.isProcessing = false;
-            
-            // Process remaining chunks if any
-            if (this.audioChunks.length >= 16000 && this.isListening) {
-                const chunksToSend = this.audioChunks.splice(0, 16000);
-                setTimeout(() => this.processAudioChunks(chunksToSend), 100);
-            } else {
-                this.isProcessing = false;
-            }
         } catch (error) {
-            console.error('Google Cloud STT API error:', error);
-            this.isProcessing = false;
-            
-            if (error.message.includes('API key') || error.message.includes('403') || error.message.includes('401')) {
-                if (this.onError) {
-                    this.onError(new Error('Invalid API key. Please check your Google Cloud API key in settings.'));
-                }
-            } else if (this.onError) {
+            console.error('Error reading stream:', error);
+            loadingLogger.log('error', `Stream read error: ${error.message}`);
+            if (this.onError && this.isListening) {
                 this.onError(error);
             }
+        }
+    }
+    
+    handleStreamResponse(response) {
+        if (response.error) {
+            console.error('Stream error:', response.error);
+            loadingLogger.log('error', `Stream error: ${response.error.message || 'Unknown error'}`);
+            if (this.onError) {
+                this.onError(new Error(response.error.message || 'Streaming error'));
+            }
+            return;
+        }
+        
+        if (response.results && response.results.length > 0) {
+            for (const result of response.results) {
+                if (result.alternatives && result.alternatives.length > 0) {
+                    const alternative = result.alternatives[0];
+                    if (alternative.transcript) {
+                        const transcript = alternative.transcript.trim();
+                        // Check if this is a final result
+                        const isFinal = result.isFinalAlternative === true || result.stability > 0.9;
+                        
+                        if (transcript && this.onResult) {
+                            console.log(`Google Cloud STT ${isFinal ? 'final' : 'interim'} result:`, transcript);
+                            loadingLogger.log('info', `Received ${isFinal ? 'final' : 'interim'} transcript: ${transcript}`);
+                            this.onResult(transcript, isFinal);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    sendAudioChunk(audioData) {
+        if (!this.streamController || !this.configSent || !this.isListening) {
+            return;
+        }
+        
+        try {
+            // Convert Int16Array to base64
+            const base64Audio = this.int16ToBase64(audioData);
+            
+            // Send audio data message (newline-delimited JSON)
+            const audioMessage = {
+                audioContent: base64Audio
+            };
+            
+            const audioJson = JSON.stringify(audioMessage) + '\n';
+            this.streamController.enqueue(new TextEncoder().encode(audioJson));
+        } catch (error) {
+            console.error('Failed to send audio chunk:', error);
+            loadingLogger.log('error', `Failed to send audio chunk: ${error.message}`);
         }
     }
     
@@ -472,6 +565,25 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
         console.log('Stopping Google Cloud STT recognition...');
         this.isListening = false;
         
+        // Close the stream
+        if (this.streamController) {
+            try {
+                this.streamController.close();
+            } catch (e) {}
+            this.streamController = null;
+        }
+        
+        if (this.reader) {
+            try {
+                this.reader.cancel();
+            } catch (e) {}
+            this.reader = null;
+        }
+        
+        if (this.streamingRequest) {
+            this.streamingRequest = null;
+        }
+        
         // Disconnect and clean up audio nodes
         if (this.processorNode) {
             this.processorNode.disconnect();
@@ -494,7 +606,8 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             this.mediaStream = null;
         }
         
-        this.audioChunks = [];
+        this.audioBuffer = [];
+        this.configSent = false;
         
         if (this.onEnd) this.onEnd();
         console.log('Google Cloud STT recognition stopped');
