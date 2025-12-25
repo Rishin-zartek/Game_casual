@@ -541,11 +541,37 @@ function startGame() {
     elements.totalQuestions.textContent = MOVIE_QUESTIONS.length;
     elements.maxScore.textContent = MOVIE_QUESTIONS.length * 15;
     
+    // Pre-warm the speech recognition engine during countdown
+    // This reduces latency when voice phase starts
+    prewarmSpeechRecognition();
+    
     // Run countdown then start
     runCountdown(() => {
         showScreen(elements.gameScreen);
         showQuestion();
     });
+}
+
+// Pre-warm the speech recognition engine to reduce initial latency
+function prewarmSpeechRecognition() {
+    if (!gameState.recognition) return;
+    
+    console.log('Pre-warming speech recognition engine...');
+    
+    try {
+        // Start and immediately stop to initialize the audio pipeline
+        gameState.recognition.start();
+        setTimeout(() => {
+            try {
+                gameState.recognition.stop();
+                console.log('Speech recognition pre-warmed successfully');
+            } catch (e) {
+                // Ignore errors during pre-warm
+            }
+        }, 500);
+    } catch (e) {
+        console.log('Pre-warm failed (may already be initialized):', e.message);
+    }
 }
 
 function showQuestion() {
@@ -599,6 +625,10 @@ function startGuessPhase() {
         if (timeLeft <= 1) {
             elements.timer.classList.remove('warning');
             elements.timer.classList.add('danger');
+            
+            // Pre-start recognition 1 second before voice phase
+            // This allows the audio pipeline to be ready immediately
+            preStartRecognition();
         }
         
         if (timeLeft <= 0) {
@@ -606,6 +636,26 @@ function startGuessPhase() {
             startVoicePhase();
         }
     }, 1000);
+}
+
+// Pre-start recognition before voice phase to eliminate startup latency
+function preStartRecognition() {
+    if (!gameState.recognition) return;
+    
+    try {
+        // Stop any existing session
+        gameState.recognition.stop();
+    } catch (e) {}
+    
+    // Small delay then start fresh
+    setTimeout(() => {
+        try {
+            gameState.recognition.start();
+            console.log('Recognition pre-started for immediate voice phase');
+        } catch (e) {
+            console.log('Could not pre-start recognition:', e.message);
+        }
+    }, 100);
 }
 
 function startVoicePhase() {
@@ -633,10 +683,14 @@ function startVoicePhase() {
     elements.timer.textContent = timeLeft;
     elements.timer.className = 'timer-value';
     
+    // Recognition may already be running from preStartRecognition()
+    // Only start if not already active
     try {
         gameState.recognition.start();
+        console.log('Started recognition in voice phase');
     } catch (e) {
-        console.log('Recognition already started');
+        // Already running from pre-start - this is expected and good for latency
+        console.log('Recognition already running (pre-started for lower latency)');
     }
     
     gameState.timerInterval = setInterval(() => {
@@ -683,7 +737,8 @@ function handleTimerEnd() {
             
             console.log('Checking processing status - isProcessing:', gameState.isProcessingAudio, 'timeSinceSpeech:', timeSinceSpeech);
             
-            if (!gameState.isProcessingAudio && timeSinceSpeech >= 2000) {
+            // Reduced from 2000ms to 1000ms for faster finalization
+            if (!gameState.isProcessingAudio && timeSinceSpeech >= 1000) {
                 clearInterval(gameState.processingCheckInterval);
                 gameState.processingCheckInterval = null;
                 
@@ -691,14 +746,16 @@ function handleTimerEnd() {
                     gameState.recognition.stop();
                 } catch (e) {}
                 
+                // Reduced from 500ms to 200ms
                 setTimeout(() => {
                     if (!gameState.isEvaluating) {
                         finalizeAndEvaluate();
                     }
-                }, 500);
+                }, 200);
             }
         }, 200);
         
+        // Reduced safety timeout from 10s to 3s for faster response
         setTimeout(() => {
             if (!gameState.isEvaluating && gameState.processingCheckInterval) {
                 console.log('Safety timeout - forcing evaluation');
@@ -711,20 +768,21 @@ function handleTimerEnd() {
                     if (!gameState.isEvaluating) {
                         finalizeAndEvaluate();
                     }
-                }, 500);
+                }, 300);
             }
-        }, 10000);
+        }, 3000);
     } else {
         console.log('No recent audio activity - stopping recognition');
         try {
             gameState.recognition.stop();
         } catch (e) {}
         
+        // Reduced from 1500ms to 500ms for faster response
         setTimeout(() => {
             if (!gameState.isEvaluating) {
                 finalizeAndEvaluate();
             }
-        }, 1500);
+        }, 500);
     }
 }
 
@@ -984,7 +1042,8 @@ function displayPreviousScores(scores) {
 
 // Start button
 elements.startBtn.addEventListener('click', () => {
-    if (initSpeechRecognition()) {
+    // Use pre-initialized recognition if available, otherwise initialize now
+    if (speechInitialized || initSpeechRecognition()) {
         startGame();
     }
 });
@@ -1162,5 +1221,29 @@ function triggerConfetti() {
 
 // Load saved settings on page load
 loadSettings();
+
+// Pre-initialize speech recognition on page load for faster startup
+// This requests microphone permission early and caches the recognition engine
+let speechInitialized = false;
+
+function initSpeechRecognitionEarly() {
+    if (speechInitialized) return true;
+    
+    const result = initSpeechRecognition();
+    if (result) {
+        speechInitialized = true;
+        console.log('Speech recognition pre-initialized on page load');
+    }
+    return result;
+}
+
+// Try to initialize on user's first interaction (required for permission)
+document.addEventListener('click', function initOnInteraction() {
+    if (!speechInitialized) {
+        initSpeechRecognitionEarly();
+    }
+    // Remove listener after first interaction
+    document.removeEventListener('click', initOnInteraction);
+}, { once: true });
 
 console.log('🎬 Emoji Movie Guessing Game loaded!');
