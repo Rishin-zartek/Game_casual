@@ -1828,6 +1828,23 @@ body {
     display: flex;
 }
 
+.persistent-logs-panel.minimized {
+    max-height: 50px;
+}
+
+.persistent-logs-panel.minimized .persistent-logs-content {
+    display: none;
+}
+
+.persistent-logs-panel.minimized .persistent-logs-header {
+    cursor: pointer;
+}
+
+.persistent-logs-panel.minimized .log-level-filters,
+.persistent-logs-panel.minimized .clear-logs-btn {
+    display: none;
+}
+
 @keyframes slideUpLogs {
     from {
         transform: translateX(-50%) translateY(100%);
@@ -1888,6 +1905,29 @@ body {
 
 .level-filter-btn:not(.active) {
     opacity: 0.4;
+}
+
+.minimize-logs-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 1.2rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    padding: 0;
+    line-height: 1;
+}
+
+.minimize-logs-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: var(--text-primary);
 }
 
 .close-logs-btn {

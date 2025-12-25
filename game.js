@@ -77,6 +77,7 @@ class LoadingLogger {
         this.showLogsBtn = null;
         this.isExpanded = false;
         this.isVisible = false; // Persistent logs visibility
+        this.isMinimized = false; // Minimized state (separate from visibility)
         this.enabledLevels = {
             info: true,
             success: true,
@@ -128,7 +129,8 @@ class LoadingLogger {
                             <button class="level-filter-btn active" data-level="error" title="Error">❌</button>
                         </div>
                         <button id="persistent-clear-logs-btn" class="clear-logs-btn">Clear</button>
-                        <button id="persistent-close-logs-btn" class="close-logs-btn">✕</button>
+                        <button id="persistent-minimize-logs-btn" class="minimize-logs-btn" title="Minimize">−</button>
+                        <button id="persistent-close-logs-btn" class="close-logs-btn" title="Close">✕</button>
                     </div>
                 </div>
                 <div id="persistent-logs-content" class="persistent-logs-content"></div>
@@ -156,12 +158,31 @@ class LoadingLogger {
             persistentClearBtn.addEventListener('click', () => this.clearLogs());
         }
         
+        // Minimize button
+        const persistentMinimizeBtn = document.getElementById('persistent-minimize-logs-btn');
+        if (persistentMinimizeBtn) {
+            persistentMinimizeBtn.addEventListener('click', () => {
+                this.toggleMinimize();
+            });
+        }
+        
         // Close button
         const persistentCloseBtn = document.getElementById('persistent-close-logs-btn');
         if (persistentCloseBtn) {
             persistentCloseBtn.addEventListener('click', () => {
                 this.setVisibility(false);
                 this.saveSettings();
+            });
+        }
+        
+        // Click header to expand when minimized
+        const persistentHeader = persistentPanel.querySelector('.persistent-logs-header');
+        if (persistentHeader) {
+            persistentHeader.addEventListener('click', (e) => {
+                // Only expand if minimized and click wasn't on a button
+                if (this.isMinimized && !e.target.closest('button')) {
+                    this.setMinimized(false);
+                }
             });
         }
     }
@@ -172,10 +193,12 @@ class LoadingLogger {
             if (saved) {
                 const settings = JSON.parse(saved);
                 this.isVisible = settings.isVisible || false;
+                this.isMinimized = settings.isMinimized || false;
                 if (settings.enabledLevels) {
                     this.enabledLevels = { ...this.enabledLevels, ...settings.enabledLevels };
                 }
                 this.setVisibility(this.isVisible);
+                this.setMinimized(this.isMinimized, false); // Don't save when loading
                 this.updateLevelFilters();
             }
         } catch (e) {
@@ -187,6 +210,7 @@ class LoadingLogger {
         try {
             const settings = {
                 isVisible: this.isVisible,
+                isMinimized: this.isMinimized,
                 enabledLevels: this.enabledLevels
             };
             localStorage.setItem('emojiQuiz_logsSettings', JSON.stringify(settings));
@@ -210,10 +234,39 @@ class LoadingLogger {
             persistentPanel.classList.toggle('visible', visible);
             // Re-render all logs when panel becomes visible
             if (visible) {
+                this.updateMinimizeState(); // Update button state
                 setTimeout(() => this.renderAllLogs(), 100);
+            } else {
+                // Reset minimized state when closing
+                this.isMinimized = false;
+                this.updateMinimizeState();
             }
         }
         this.saveSettings();
+    }
+    
+    setMinimized(minimized, save = true) {
+        this.isMinimized = minimized;
+        this.updateMinimizeState();
+        if (save) {
+            this.saveSettings();
+        }
+    }
+    
+    toggleMinimize() {
+        this.setMinimized(!this.isMinimized);
+    }
+    
+    updateMinimizeState() {
+        const persistentPanel = document.getElementById('persistent-logs-panel');
+        const minimizeBtn = document.getElementById('persistent-minimize-logs-btn');
+        if (persistentPanel) {
+            persistentPanel.classList.toggle('minimized', this.isMinimized);
+        }
+        if (minimizeBtn) {
+            minimizeBtn.textContent = this.isMinimized ? '+' : '−';
+            minimizeBtn.title = this.isMinimized ? 'Expand' : 'Minimize';
+        }
     }
     
     toggleVisibility() {
