@@ -12,39 +12,81 @@
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
+    <canvas id="confetti-canvas"></canvas>
     <div class="game-container">
         <!-- Start Screen -->
         <div id="start-screen" class="screen active">
-            <div class="logo">🎬🎭🎥</div>
-            <h1>Emoji Movie Quiz</h1>
-            <p class="tagline">Guess the movie from emojis using your voice!</p>
-            
-            <div class="settings-panel">
-                <h3>⚙️ Game Settings</h3>
-                <div class="setting-row">
-                    <label for="guess-time">Think Time (seconds):</label>
-                    <input type="number" id="guess-time" value="5" min="3" max="15">
+            <div class="hero-section">
+                <div class="logo-container">
+                    <div class="logo-glow"></div>
+                    <div class="logo">🎬</div>
                 </div>
-                <div class="setting-row">
-                    <label for="voice-time">Voice Time (seconds):</label>
-                    <input type="number" id="voice-time" value="5" min="3" max="15">
+                <h1>Emoji Movie Quiz</h1>
+                <p class="tagline">Guess the movie from emojis using your voice!</p>
+            </div>
+            
+            <div class="settings-card">
+                <div class="settings-header">
+                    <span class="settings-icon">⚙️</span>
+                    <span>Game Settings</span>
+                </div>
+                <div class="settings-grid">
+                    <div class="setting-item">
+                        <div class="setting-label">
+                            <span class="setting-emoji">🧠</span>
+                            <span>Think Time</span>
+                        </div>
+                        <div class="input-wrapper">
+                            <button class="input-btn minus" data-target="guess-time">−</button>
+                            <input type="number" id="guess-time" value="3" min="3" max="15">
+                            <button class="input-btn plus" data-target="guess-time">+</button>
+                            <span class="input-unit">sec</span>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <div class="setting-label">
+                            <span class="setting-emoji">🎤</span>
+                            <span>Speak Time</span>
+                        </div>
+                        <div class="input-wrapper">
+                            <button class="input-btn minus" data-target="voice-time">−</button>
+                            <input type="number" id="voice-time" value="10" min="3" max="15">
+                            <button class="input-btn plus" data-target="voice-time">+</button>
+                            <span class="input-unit">sec</span>
+                        </div>
+                    </div>
                 </div>
             </div>
             
-            <button id="start-btn" class="btn primary-btn">
+            <button id="start-btn" class="btn primary-btn glow-btn">
                 <span class="btn-icon">🎮</span>
-                Start Game
+                <span>Start Game</span>
             </button>
             
-            <div class="instructions">
-                <h4>How to Play:</h4>
-                <ol>
-                    <li>🧠 Look at the emojis and think of the movie</li>
-                    <li>🎤 When prompted, speak the movie name</li>
-                    <li>⚡ Answer faster for bonus points!</li>
-                    <li>🎯 Don't worry about exact pronunciation</li>
-                    <li>🏆 Get 10 pts + up to 5 speed bonus!</li>
-                </ol>
+            <div class="how-to-play">
+                <div class="how-to-header">
+                    <span>How to Play</span>
+                </div>
+                <div class="steps-container">
+                    <div class="step">
+                        <div class="step-icon">🧠</div>
+                        <p>Study the emojis</p>
+                    </div>
+                    <div class="step-arrow">→</div>
+                    <div class="step">
+                        <div class="step-icon">🎤</div>
+                        <p>Speak the answer</p>
+                    </div>
+                    <div class="step-arrow">→</div>
+                    <div class="step">
+                        <div class="step-icon">🏆</div>
+                        <p>Earn points!</p>
+                    </div>
+                </div>
+                <div class="bonus-tip">
+                    <span class="bonus-badge">⚡ TIP</span>
+                    <span>Answer faster for bonus points!</span>
+                </div>
             </div>
         </div>
 

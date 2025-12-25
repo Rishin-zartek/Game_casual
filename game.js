@@ -63,8 +63,8 @@ class GameState {
     constructor() {
         this.currentQuestionIndex = 0;
         this.score = 0;
-        this.guessTime = 5;
-        this.voiceTime = 5;
+        this.guessTime = 3;
+        this.voiceTime = 10;
         this.results = [];
         this.correctCount = 0;
         this.incorrectCount = 0;
@@ -344,8 +344,8 @@ function showScreen(screen) {
 // Game Flow
 function startGame() {
     gameState.reset();
-    gameState.guessTime = parseInt(elements.guessTimeInput.value) || 5;
-    gameState.voiceTime = parseInt(elements.voiceTimeInput.value) || 5;
+    gameState.guessTime = parseInt(elements.guessTimeInput.value) || 3;
+    gameState.voiceTime = parseInt(elements.voiceTimeInput.value) || 10;
     gameState.isGameActive = true;
     
     elements.totalQuestions.textContent = MOVIE_QUESTIONS.length;
@@ -501,6 +501,9 @@ function evaluateAnswer() {
             
             gameState.score += result.totalPoints;
             gameState.correctCount++;
+            
+            // Trigger confetti celebration!
+            triggerConfetti();
             
             if (result.timeBonus > 0) {
                 showFeedback('correct', `✅ Correct! +${result.basePoints} pts (+${result.timeBonus} speed bonus!)`);
@@ -663,6 +666,112 @@ window.addEventListener('beforeunload', (e) => {
         e.preventDefault();
         e.returnValue = '';
     }
+});
+
+// Confetti System
+class ConfettiSystem {
+    constructor() {
+        this.canvas = document.getElementById('confetti-canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.particles = [];
+        this.isAnimating = false;
+        this.resizeCanvas();
+        window.addEventListener('resize', () => this.resizeCanvas());
+    }
+
+    resizeCanvas() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+    }
+
+    createParticle() {
+        const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#ffeaa7', '#dfe6e9', '#fd79a8', '#6c5ce7', '#00b894', '#e17055'];
+        return {
+            x: Math.random() * this.canvas.width,
+            y: -20,
+            size: Math.random() * 10 + 5,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            speedY: Math.random() * 3 + 2,
+            speedX: Math.random() * 4 - 2,
+            rotation: Math.random() * 360,
+            rotationSpeed: Math.random() * 10 - 5,
+            shape: Math.random() > 0.5 ? 'rect' : 'circle',
+            opacity: 1
+        };
+    }
+
+    burst(count = 100) {
+        for (let i = 0; i < count; i++) {
+            setTimeout(() => {
+                this.particles.push(this.createParticle());
+            }, i * 15);
+        }
+        if (!this.isAnimating) {
+            this.isAnimating = true;
+            this.animate();
+        }
+    }
+
+    animate() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        this.particles = this.particles.filter(p => {
+            p.y += p.speedY;
+            p.x += p.speedX;
+            p.rotation += p.rotationSpeed;
+            p.speedY += 0.1; // gravity
+            p.opacity -= 0.005;
+
+            if (p.y > this.canvas.height || p.opacity <= 0) return false;
+
+            this.ctx.save();
+            this.ctx.translate(p.x, p.y);
+            this.ctx.rotate((p.rotation * Math.PI) / 180);
+            this.ctx.globalAlpha = p.opacity;
+            this.ctx.fillStyle = p.color;
+
+            if (p.shape === 'rect') {
+                this.ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+            } else {
+                this.ctx.beginPath();
+                this.ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
+                this.ctx.fill();
+            }
+
+            this.ctx.restore();
+            return true;
+        });
+
+        if (this.particles.length > 0) {
+            requestAnimationFrame(() => this.animate());
+        } else {
+            this.isAnimating = false;
+        }
+    }
+}
+
+const confetti = new ConfettiSystem();
+
+// Trigger confetti on correct answer
+function triggerConfetti() {
+    confetti.burst(80);
+}
+
+// Settings input buttons functionality
+document.querySelectorAll('.input-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const targetId = btn.dataset.target;
+        const input = document.getElementById(targetId);
+        const currentValue = parseInt(input.value) || 3;
+        const min = parseInt(input.min) || 3;
+        const max = parseInt(input.max) || 15;
+        
+        if (btn.classList.contains('plus')) {
+            input.value = Math.min(currentValue + 1, max);
+        } else {
+            input.value = Math.max(currentValue - 1, min);
+        }
+    });
 });
 
 console.log('🎬 Emoji Movie Guessing Game loaded!');
