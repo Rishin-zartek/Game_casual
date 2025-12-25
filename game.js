@@ -510,7 +510,8 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             return true;
             
         } catch (error) {
-            loadingLogger.log('error', `Google Cloud STT initialization failed: ${error.message}`);
+            const errorMessage = error?.message || error?.toString() || 'Unknown error';
+            loadingLogger.log('error', `Google Cloud STT initialization failed: ${errorMessage}`);
             this.isLoading = false;
             if (this.onError) this.onError(error);
             throw error;
@@ -584,7 +585,8 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                     this.sendAudioChunk(int16Data);
                 } catch (error) {
                     console.error('Audio processing failed', error);
-                    loadingLogger.log('error', `Audio processing failed: ${error.message}`);
+                    const errorMessage = error?.message || error?.toString() || 'Unknown error';
+                    loadingLogger.log('error', `Audio processing failed: ${errorMessage}`);
                 }
             };
             
@@ -598,7 +600,8 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             console.log('Google Cloud STT streaming recognition started');
             
         } catch (error) {
-            const errorMsg = `Failed to start Google Cloud STT recognition: ${error.message}`;
+            const errorMessage = error?.message || error?.toString() || 'Unknown error';
+            const errorMsg = `Failed to start Google Cloud STT recognition: ${errorMessage}`;
             console.error(errorMsg, error);
             loadingLogger.log('error', errorMsg);
             if (this.onError) this.onError(error);
@@ -656,8 +659,9 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                 // We'll try without it first
             }).catch(error => {
                 // If fetch fails, provide a more helpful error message
-                loadingLogger.log('error', `Fetch request failed: ${error.message}`);
-                if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
+                const errorMessage = error?.message || error?.toString() || 'Unknown error';
+                loadingLogger.log('error', `Fetch request failed: ${errorMessage}`);
+                if ((errorMessage && errorMessage.includes('Failed to fetch')) || error.name === 'TypeError') {
                     throw new Error('Network error: Could not connect to Google Cloud STT. This may be due to CORS restrictions or network issues. Please check your internet connection and ensure the API key is valid.');
                 }
                 throw error;
@@ -698,15 +702,16 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             
         } catch (error) {
             console.error('Failed to start streaming RPC:', error);
-            loadingLogger.log('error', `Streaming RPC failed: ${error.message}`);
+            const errorMessage = error?.message || error?.toString() || 'Unknown error';
+            loadingLogger.log('error', `Streaming RPC failed: ${errorMessage}`);
             if (this.onError) {
-                let userFriendlyError = error.message;
+                let userFriendlyError = errorMessage;
                 
-                if (error.message.includes('API key') || error.message.includes('403') || error.message.includes('401')) {
+                if (errorMessage && (errorMessage.includes('API key') || errorMessage.includes('403') || errorMessage.includes('401'))) {
                     userFriendlyError = 'Invalid API key. Please check your Google Cloud API key in settings.';
-                } else if (error.message.includes('Failed to fetch') || error.message.includes('Network error')) {
+                } else if (errorMessage && (errorMessage.includes('Failed to fetch') || errorMessage.includes('Network error'))) {
                     userFriendlyError = 'Network error: Could not connect to Google Cloud STT. Please check your internet connection and API key.';
-                } else if (error.message.includes('CORS')) {
+                } else if (errorMessage && errorMessage.includes('CORS')) {
                     userFriendlyError = 'CORS error: The API may not be accessible from this origin. Please check your API key and CORS settings.';
                 }
                 
@@ -761,7 +766,8 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             }
         } catch (error) {
             console.error('Error reading stream:', error);
-            loadingLogger.log('error', `Stream read error: ${error.message}`);
+            const errorMessage = error?.message || error?.toString() || 'Unknown error';
+            loadingLogger.log('error', `Stream read error: ${errorMessage}`);
             if (this.onError && this.isListening) {
                 this.onError(error);
             }
@@ -771,9 +777,10 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
     handleStreamResponse(response) {
         if (response.error) {
             console.error('Stream error:', response.error);
-            loadingLogger.log('error', `Stream error: ${response.error.message || 'Unknown error'}`);
+            const errorMessage = response.error?.message || response.error?.toString() || 'Unknown error';
+            loadingLogger.log('error', `Stream error: ${errorMessage}`);
             if (this.onError) {
-                this.onError(new Error(response.error.message || 'Streaming error'));
+                this.onError(new Error(errorMessage || 'Streaming error'));
             }
             return;
         }
@@ -823,7 +830,8 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             this.streamController.enqueue(new TextEncoder().encode(audioJson));
         } catch (error) {
             console.error('Failed to send audio chunk:', error);
-            loadingLogger.log('error', `Failed to send audio chunk: ${error.message}`);
+            const errorMessage = error?.message || error?.toString() || 'Unknown error';
+            loadingLogger.log('error', `Failed to send audio chunk: ${errorMessage}`);
         }
     }
     
@@ -860,7 +868,8 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                 this.streamController.close();
                 loadingLogger.log('info', 'Stream controller closed');
             } catch (e) {
-                loadingLogger.log('warning', `Error closing stream controller: ${e.message}`);
+                const errorMessage = e?.message || e?.toString() || 'Unknown error';
+                loadingLogger.log('warning', `Error closing stream controller: ${errorMessage}`);
             }
             this.streamController = null;
         }
@@ -870,7 +879,8 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                 this.reader.cancel();
                 loadingLogger.log('info', 'Stream reader cancelled');
             } catch (e) {
-                loadingLogger.log('warning', `Error cancelling reader: ${e.message}`);
+                const errorMessage = e?.message || e?.toString() || 'Unknown error';
+                loadingLogger.log('warning', `Error cancelling reader: ${errorMessage}`);
             }
             this.reader = null;
         }
@@ -1027,7 +1037,8 @@ class WebSpeechEngine extends SpeechEngineInterface {
         try {
             this.recognition.start();
         } catch (e) {
-            console.log('Web Speech start error (may already be running):', e.message);
+            const errorMessage = e?.message || e?.toString() || 'Unknown error';
+            console.log('Web Speech start error (may already be running):', errorMessage);
         }
     }
     
@@ -1115,7 +1126,8 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
             return true;
             
         } catch (error) {
-            loadingLogger.log('error', `ElevenLabs STT initialization failed: ${error.message}`);
+            const errorMessage = error?.message || error?.toString() || 'Unknown error';
+            loadingLogger.log('error', `ElevenLabs STT initialization failed: ${errorMessage}`);
             this.isLoading = false;
             if (this.onError) this.onError(error);
             throw error;
@@ -1188,7 +1200,8 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
                     this.sendAudioChunk(int16Data);
                 } catch (error) {
                     console.error('Audio processing failed', error);
-                    loadingLogger.log('error', `Audio processing failed: ${error.message}`);
+                    const errorMessage = error?.message || error?.toString() || 'Unknown error';
+                    loadingLogger.log('error', `Audio processing failed: ${errorMessage}`);
                 }
             };
             
@@ -1202,7 +1215,7 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
             console.log('ElevenLabs STT streaming recognition started');
             
         } catch (error) {
-            const errorMsg = `Failed to start ElevenLabs STT recognition: ${error.message}`;
+            const errorMsg = `Failed to start ElevenLabs STT recognition: ${error?.message || error?.toString() || 'Unknown error'}`;
             console.error(errorMsg, error);
             loadingLogger.log('error', errorMsg);
             if (this.onError) this.onError(error);
@@ -1256,24 +1269,29 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
                             loadingLogger.log('info', 'Received ArrayBuffer data from ElevenLabs');
                         }
                     } catch (error) {
-                        loadingLogger.log('warning', `Failed to parse WebSocket message: ${error.message}`);
+                        const errorMessage = error?.message || error?.toString() || 'Unknown error';
+                        loadingLogger.log('warning', `Failed to parse WebSocket message: ${errorMessage}`);
                         console.error('Failed to parse message:', error);
                     }
                 };
                 
-                this.ws.onerror = (error) => {
+                this.ws.onerror = (event) => {
                     clearTimeout(timeout);
-                    console.error('WebSocket error:', error);
-                    loadingLogger.log('error', `WebSocket error: ${error.message || 'Unknown error'}`);
-                    reject(error);
+                    console.error('WebSocket error:', event);
+                    // WebSocket onerror receives an ErrorEvent, not an Error object
+                    const errorMessage = event?.message || event?.error?.message || event?.error?.toString() || event?.toString() || 'Unknown error';
+                    loadingLogger.log('error', `WebSocket error: ${errorMessage}`);
+                    reject(event?.error instanceof Error ? event.error : new Error(errorMessage));
                 };
                 
                 this.ws.onclose = (event) => {
-                    console.log('WebSocket closed:', event.code, event.reason);
-                    loadingLogger.log('info', `WebSocket closed: ${event.code} - ${event.reason || 'No reason'}`);
+                    const closeCode = event?.code ?? 1006; // 1006 = abnormal closure
+                    const closeReason = event?.reason || 'No reason';
+                    console.log('WebSocket closed:', closeCode, closeReason);
+                    loadingLogger.log('info', `WebSocket closed: ${closeCode} - ${closeReason}`);
                     this.ws = null;
                     
-                    if (this.isListening && event.code !== 1000) {
+                    if (this.isListening && closeCode !== 1000) {
                         // Unexpected close, notify error
                         if (this.onError) {
                             this.onError(new Error('WebSocket connection closed unexpectedly'));
@@ -1284,13 +1302,14 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
             
         } catch (error) {
             console.error('Failed to start WebSocket:', error);
-            loadingLogger.log('error', `WebSocket failed: ${error.message}`);
+            const errorMessage = error?.message || error?.toString() || 'Unknown error';
+            loadingLogger.log('error', `WebSocket failed: ${errorMessage}`);
             if (this.onError) {
-                let userFriendlyError = error.message;
+                let userFriendlyError = errorMessage;
                 
-                if (error.message.includes('API key') || error.message.includes('403') || error.message.includes('401')) {
+                if (errorMessage && (errorMessage.includes('API key') || errorMessage.includes('403') || errorMessage.includes('401'))) {
                     userFriendlyError = 'Invalid API key. Please check your ElevenLabs API key in settings.';
-                } else if (error.message.includes('Failed to fetch') || error.message.includes('Network error')) {
+                } else if (errorMessage && (errorMessage.includes('Failed to fetch') || errorMessage.includes('Network error'))) {
                     userFriendlyError = 'Network error: Could not connect to ElevenLabs. Please check your internet connection and API key.';
                 }
                 
@@ -1303,9 +1322,10 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
     handleWebSocketMessage(data) {
         if (data.error) {
             console.error('WebSocket error:', data.error);
-            loadingLogger.log('error', `WebSocket error: ${data.error.message || data.error || 'Unknown error'}`);
+            const errorMessage = data.error?.message || data.error?.toString() || 'Unknown error';
+            loadingLogger.log('error', `WebSocket error: ${errorMessage}`);
             if (this.onError) {
-                this.onError(new Error(data.error.message || data.error || 'WebSocket error'));
+                this.onError(new Error(errorMessage || 'WebSocket error'));
             }
             return;
         }
@@ -1370,7 +1390,8 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
             this.ws.send(JSON.stringify(audioMessage));
         } catch (error) {
             console.error('Failed to send audio chunk:', error);
-            loadingLogger.log('error', `Failed to send audio chunk: ${error.message}`);
+            const errorMessage = error?.message || error?.toString() || 'Unknown error';
+            loadingLogger.log('error', `Failed to send audio chunk: ${errorMessage}`);
         }
     }
     
@@ -1409,7 +1430,8 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
                 }
                 loadingLogger.log('info', 'WebSocket closed');
             } catch (e) {
-                loadingLogger.log('warning', `Error closing WebSocket: ${e.message}`);
+                const errorMessage = e?.message || e?.toString() || 'Unknown error';
+                loadingLogger.log('warning', `Error closing WebSocket: ${errorMessage}`);
             }
             this.ws = null;
         }
@@ -2020,9 +2042,10 @@ async function initializeSelectedEngine() {
         return true;
         
     } catch (error) {
-        loadingLogger.log('error', `Engine initialization failed: ${error.message}`);
+        const errorMessage = error?.message || error?.toString() || 'Unknown error';
+        loadingLogger.log('error', `Engine initialization failed: ${errorMessage}`);
         showLoadingOverlay(false);
-        updateEngineStatus('error', 'Failed to initialize: ' + error.message);
+        updateEngineStatus('error', 'Failed to initialize: ' + errorMessage);
         
         // Try to fall back to Web Speech
         if (selectedEngine === 'googlecloud' && speechEngine.engines.webspeech.isAvailable()) {
@@ -2037,7 +2060,8 @@ async function initializeSelectedEngine() {
                 loadingLogger.log('success', 'Fallback to Web Speech successful');
                 return true;
             } catch (e) {
-                loadingLogger.log('error', `Fallback also failed: ${e.message}`);
+                const errorMessage = e?.message || e?.toString() || 'Unknown error';
+                loadingLogger.log('error', `Fallback also failed: ${errorMessage}`);
             }
         }
         
@@ -2075,8 +2099,9 @@ function handleSpeechResult(transcript, isFinal) {
 // Handle speech recognition errors
 function handleSpeechError(error) {
     console.error('Speech recognition error:', error);
-    loadingLogger.log('error', `Speech recognition error: ${error.message || error}`);
-    if (error.message === 'Microphone access denied') {
+    const errorMessage = error?.message || error?.toString() || 'Unknown error';
+    loadingLogger.log('error', `Speech recognition error: ${errorMessage}`);
+    if (errorMessage === 'Microphone access denied') {
         alert('Microphone access denied. Please allow microphone access to play the game.');
     }
 }
@@ -2323,7 +2348,8 @@ function preStartRecognition() {
             speechEngine.start();
             console.log('Recognition pre-started for immediate voice phase');
         } catch (e) {
-            console.log('Could not pre-start recognition:', e.message);
+            const errorMessage = e?.message || e?.toString() || 'Unknown error';
+            console.log('Could not pre-start recognition:', errorMessage);
         }
     }, 100);
 }
