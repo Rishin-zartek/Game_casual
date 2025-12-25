@@ -58,6 +58,12 @@ const MOVIE_QUESTIONS = [
     }
 ];
 
+// LocalStorage keys
+const STORAGE_KEYS = {
+    SETTINGS: 'emojiQuiz_settings',
+    SCORES: 'emojiQuiz_scores'
+};
+
 // Game State
 class GameState {
     constructor() {
@@ -74,16 +80,16 @@ class GameState {
         this.timerInterval = null;
         this.recognition = null;
         this.recognizedText = '';
-        this.voicePhaseStartTime = null; // Track when voice phase started
-        this.answerTime = null; // Track when correct answer was first recognized
-        this.correctAnswerDetected = false; // Track if we already detected a correct answer
-        this.isEvaluating = false; // Prevent multiple evaluations
-        this.waitingForFinalResult = false; // Track if we're waiting for final speech result
-        this.hasReceivedFinalConfirmation = false; // Track if we have full confirmation
-        this.lastSpeechTime = null; // Track when we last received speech input
-        this.isProcessingAudio = false; // Track if audio is being actively processed
-        this.timerEnded = false; // Track if the timer has ended
-        this.processingCheckInterval = null; // Interval to check if processing is complete
+        this.voicePhaseStartTime = null;
+        this.answerTime = null;
+        this.correctAnswerDetected = false;
+        this.isEvaluating = false;
+        this.waitingForFinalResult = false;
+        this.hasReceivedFinalConfirmation = false;
+        this.lastSpeechTime = null;
+        this.isProcessingAudio = false;
+        this.timerEnded = false;
+        this.processingCheckInterval = null;
     }
 
     reset() {
@@ -151,7 +157,6 @@ function metaphone(str) {
     let word = str.toUpperCase().replace(/[^A-Z]/g, '');
     if (!word) return '';
     
-    // Common phonetic transformations
     const transforms = [
         [/^KN|^GN|^PN|^WR|^PS/, ''],
         [/^X/, 'S'],
@@ -194,25 +199,17 @@ function soundsLike(str1, str2) {
     const s1 = str1.toLowerCase().trim();
     const s2 = str2.toLowerCase().trim();
     
-    // Direct match
     if (s1 === s2) return true;
-    
-    // Soundex match
     if (soundex(s1) === soundex(s2)) return true;
-    
-    // Metaphone match
     if (metaphone(s1) === metaphone(s2)) return true;
     
-    // Check individual words for multi-word strings
     const words1 = s1.split(/\s+/);
     const words2 = s2.split(/\s+/);
     
-    // For single words, check phonetic similarity
     if (words1.length === 1 && words2.length === 1) {
         return soundex(s1) === soundex(s2) || metaphone(s1) === metaphone(s2);
     }
     
-    // For multi-word, check if key words match phonetically
     const matchingWords = words1.filter(w1 => 
         words2.some(w2 => 
             soundex(w1) === soundex(w2) || 
@@ -221,30 +218,25 @@ function soundsLike(str1, str2) {
         )
     );
     
-    // Consider a match if at least 60% of words match phonetically
     return matchingWords.length >= Math.ceil(words1.length * 0.6);
 }
 
 // Calculate time bonus based on reaction time
 function calculateTimeBonus(reactionTimeMs, maxTimeMs) {
-    // No answer given
     if (reactionTimeMs === null) return 0;
     
     const reactionTimeSec = reactionTimeMs / 1000;
     const maxTimeSec = maxTimeMs / 1000;
-    
-    // If answered within first 25% of time, give max bonus (5 points)
-    // Linear decrease to 0 bonus at full time
     const timeRatio = reactionTimeSec / maxTimeSec;
     
     if (timeRatio <= 0.25) {
-        return 5; // Max bonus for very fast answers
+        return 5;
     } else if (timeRatio <= 0.5) {
-        return 4; // Good bonus
+        return 4;
     } else if (timeRatio <= 0.75) {
-        return 2; // Small bonus
+        return 2;
     } else {
-        return 1; // Minimal bonus for answering at all
+        return 1;
     }
 }
 
@@ -256,11 +248,22 @@ const elements = {
     startScreen: document.getElementById('start-screen'),
     gameScreen: document.getElementById('game-screen'),
     resultsScreen: document.getElementById('results-screen'),
+    countdownScreen: document.getElementById('countdown-screen'),
     
-    // Start screen
+    // Settings
+    settingsBtn: document.getElementById('settings-btn'),
+    settingsModal: document.getElementById('settings-modal'),
+    closeSettings: document.getElementById('close-settings'),
+    saveSettings: document.getElementById('save-settings'),
+    clearDataBtn: document.getElementById('clear-data-btn'),
     guessTimeInput: document.getElementById('guess-time'),
     voiceTimeInput: document.getElementById('voice-time'),
+    
+    // Start screen
     startBtn: document.getElementById('start-btn'),
+    
+    // Countdown
+    countdownNumber: document.getElementById('countdown-number'),
     
     // Game screen
     score: document.getElementById('score'),
@@ -282,11 +285,84 @@ const elements = {
     incorrectCount: document.getElementById('incorrect-count'),
     timeoutCount: document.getElementById('timeout-count'),
     performanceMessage: document.getElementById('performance-message'),
+    previousScores: document.getElementById('previous-scores'),
     answersList: document.getElementById('answers-list'),
     playAgainBtn: document.getElementById('play-again-btn')
 };
 
-// Initialize Speech Recognition
+// ============================================
+// LOCAL STORAGE FUNCTIONS
+// ============================================
+
+function loadSettings() {
+    try {
+        const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+        if (saved) {
+            const settings = JSON.parse(saved);
+            elements.guessTimeInput.value = settings.guessTime || 3;
+            elements.voiceTimeInput.value = settings.voiceTime || 10;
+        }
+    } catch (e) {
+        console.log('Could not load settings:', e);
+    }
+}
+
+function saveSettingsToStorage() {
+    try {
+        const settings = {
+            guessTime: parseInt(elements.guessTimeInput.value) || 3,
+            voiceTime: parseInt(elements.voiceTimeInput.value) || 10
+        };
+        localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+    } catch (e) {
+        console.log('Could not save settings:', e);
+    }
+}
+
+function loadScoreHistory() {
+    try {
+        const saved = localStorage.getItem(STORAGE_KEYS.SCORES);
+        return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+        console.log('Could not load scores:', e);
+        return [];
+    }
+}
+
+function saveScore(score) {
+    try {
+        const scores = loadScoreHistory();
+        scores.unshift({
+            score: score,
+            date: new Date().toISOString(),
+            maxScore: MOVIE_QUESTIONS.length * 15
+        });
+        // Keep only last 10 scores
+        const trimmedScores = scores.slice(0, 10);
+        localStorage.setItem(STORAGE_KEYS.SCORES, JSON.stringify(trimmedScores));
+        return trimmedScores;
+    } catch (e) {
+        console.log('Could not save score:', e);
+        return [];
+    }
+}
+
+function clearAllData() {
+    try {
+        localStorage.removeItem(STORAGE_KEYS.SETTINGS);
+        localStorage.removeItem(STORAGE_KEYS.SCORES);
+        elements.guessTimeInput.value = 3;
+        elements.voiceTimeInput.value = 10;
+        alert('All scores and settings have been cleared!');
+    } catch (e) {
+        console.log('Could not clear data:', e);
+    }
+}
+
+// ============================================
+// SPEECH RECOGNITION
+// ============================================
+
 function initSpeechRecognition() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     
@@ -305,7 +381,6 @@ function initSpeechRecognition() {
         let interimTranscript = '';
         let hasInterim = false;
         
-        // Accumulate ALL results to get the full transcript
         for (let i = 0; i < event.results.length; i++) {
             const transcript = event.results[i][0].transcript;
             if (event.results[i].isFinal) {
@@ -316,34 +391,26 @@ function initSpeechRecognition() {
             }
         }
         
-        // Track that we're receiving audio input
         gameState.lastSpeechTime = Date.now();
-        gameState.isProcessingAudio = hasInterim; // Still processing if we have interim results
+        gameState.isProcessingAudio = hasInterim;
         
-        // Combine final and interim to show everything the user has said
         const newText = (finalTranscript + interimTranscript).trim();
         if (newText) {
             gameState.recognizedText = newText;
             elements.recognizedText.textContent = `"${gameState.recognizedText}"`;
         }
         
-        console.log(`Speech result - Final: "${finalTranscript.trim()}", Interim: "${interimTranscript.trim()}", Processing: ${gameState.isProcessingAudio}`);
+        console.log(`Speech result - Final: "${finalTranscript.trim()}", Interim: "${interimTranscript.trim()}"`);
         
-        // Check if the recognized text matches the correct answer
         if (newText && gameState.voicePhaseStartTime && !gameState.correctAnswerDetected) {
             const question = MOVIE_QUESTIONS[gameState.currentQuestionIndex];
             if (checkAnswerMatch(newText, question)) {
-                // Record the time when correct answer was FIRST detected
                 gameState.answerTime = Date.now() - gameState.voicePhaseStartTime;
                 gameState.correctAnswerDetected = true;
                 console.log(`Correct answer detected at ${gameState.answerTime}ms`);
-                // Mark that we received confirmation of the answer
                 gameState.hasReceivedFinalConfirmation = true;
             }
         }
-        
-        // Don't immediately evaluate on final result - let the timeout handle it
-        // This gives more time for the complete phrase to be recognized
     };
     
     gameState.recognition.onerror = (event) => {
@@ -353,7 +420,6 @@ function initSpeechRecognition() {
         }
     };
     
-    // Track when speech is detected
     gameState.recognition.onspeechstart = () => {
         console.log('Speech started');
         gameState.isProcessingAudio = true;
@@ -362,7 +428,6 @@ function initSpeechRecognition() {
     
     gameState.recognition.onspeechend = () => {
         console.log('Speech ended');
-        // Don't immediately set isProcessingAudio to false - wait for final results
         gameState.lastSpeechTime = Date.now();
     };
     
@@ -372,21 +437,16 @@ function initSpeechRecognition() {
     
     gameState.recognition.onaudioend = () => {
         console.log('Audio capture ended');
-        // This fires when audio capture stops
-        // Mark last speech time to track when we stopped receiving audio
         gameState.lastSpeechTime = Date.now();
     };
     
     gameState.recognition.onend = () => {
         console.log('Speech recognition ended. Timer ended:', gameState.timerEnded, 'Evaluating:', gameState.isEvaluating);
         
-        // Mark that audio processing has stopped
         gameState.isProcessingAudio = false;
         
-        // If timer has ended and we're waiting, now we can evaluate
         if (gameState.timerEnded && !gameState.isEvaluating) {
             console.log('Recognition ended after timer - triggering final evaluation');
-            // Give a small buffer then evaluate
             setTimeout(() => {
                 if (!gameState.isEvaluating) {
                     finalizeAndEvaluate();
@@ -395,7 +455,6 @@ function initSpeechRecognition() {
             return;
         }
         
-        // Restart if still in voice phase and timer hasn't ended
         if (gameState.isGameActive && gameState.currentPhase === 'voice' && 
             !gameState.timerEnded && !gameState.isEvaluating) {
             try {
@@ -416,15 +475,63 @@ function showBrowserWarning() {
     document.body.prepend(warning);
 }
 
-// Screen Management
+// ============================================
+// SCREEN MANAGEMENT
+// ============================================
+
 function showScreen(screen) {
     elements.startScreen.classList.remove('active');
     elements.gameScreen.classList.remove('active');
     elements.resultsScreen.classList.remove('active');
+    elements.countdownScreen.classList.remove('active');
     screen.classList.add('active');
 }
 
-// Game Flow
+// ============================================
+// SETTINGS MODAL
+// ============================================
+
+function openSettings() {
+    elements.settingsModal.classList.add('active');
+}
+
+function closeSettingsModal() {
+    elements.settingsModal.classList.remove('active');
+}
+
+// ============================================
+// COUNTDOWN ANIMATION
+// ============================================
+
+function runCountdown(callback) {
+    showScreen(elements.countdownScreen);
+    let count = 3;
+    elements.countdownNumber.textContent = count;
+    
+    const countdownInterval = setInterval(() => {
+        count--;
+        if (count > 0) {
+            elements.countdownNumber.textContent = count;
+            // Add animation effect
+            elements.countdownNumber.style.transform = 'scale(1.2)';
+            setTimeout(() => {
+                elements.countdownNumber.style.transform = 'scale(1)';
+            }, 200);
+        } else if (count === 0) {
+            elements.countdownNumber.textContent = 'GO!';
+            elements.countdownNumber.style.color = '#10b981';
+        } else {
+            clearInterval(countdownInterval);
+            elements.countdownNumber.style.color = '';
+            callback();
+        }
+    }, 1000);
+}
+
+// ============================================
+// GAME FLOW
+// ============================================
+
 function startGame() {
     gameState.reset();
     gameState.guessTime = parseInt(elements.guessTimeInput.value) || 3;
@@ -432,11 +539,13 @@ function startGame() {
     gameState.isGameActive = true;
     
     elements.totalQuestions.textContent = MOVIE_QUESTIONS.length;
-    // Max score = 10 base + 5 max bonus per question
     elements.maxScore.textContent = MOVIE_QUESTIONS.length * 15;
     
-    showScreen(elements.gameScreen);
-    showQuestion();
+    // Run countdown then start
+    runCountdown(() => {
+        showScreen(elements.gameScreen);
+        showQuestion();
+    });
 }
 
 function showQuestion() {
@@ -465,7 +574,6 @@ function showQuestion() {
         gameState.processingCheckInterval = null;
     }
     
-    // Start guess phase
     startGuessPhase();
 }
 
@@ -473,7 +581,6 @@ function startGuessPhase() {
     gameState.currentPhase = 'guess';
     let timeLeft = gameState.guessTime;
     
-    // Update UI for guess phase
     elements.phaseLabel.textContent = 'Think';
     elements.phaseIcon.textContent = '🧠';
     elements.phaseIcon.className = 'phase-icon thinking';
@@ -482,12 +589,10 @@ function startGuessPhase() {
     elements.timer.textContent = timeLeft;
     elements.timer.className = 'timer-value';
     
-    // Start countdown
     gameState.timerInterval = setInterval(() => {
         timeLeft--;
         elements.timer.textContent = timeLeft;
         
-        // Add warning classes
         if (timeLeft <= 3) {
             elements.timer.classList.add('warning');
         }
@@ -520,7 +625,6 @@ function startVoicePhase() {
     }
     let timeLeft = gameState.voiceTime;
     
-    // Update UI for voice phase
     elements.phaseLabel.textContent = 'Speak';
     elements.phaseIcon.textContent = '🎤';
     elements.phaseIcon.className = 'phase-icon speaking';
@@ -529,19 +633,16 @@ function startVoicePhase() {
     elements.timer.textContent = timeLeft;
     elements.timer.className = 'timer-value';
     
-    // Start speech recognition
     try {
         gameState.recognition.start();
     } catch (e) {
         console.log('Recognition already started');
     }
     
-    // Start countdown
     gameState.timerInterval = setInterval(() => {
         timeLeft--;
         elements.timer.textContent = timeLeft;
         
-        // Add warning classes
         if (timeLeft <= 3) {
             elements.timer.classList.add('warning');
         }
@@ -557,17 +658,13 @@ function startVoicePhase() {
     }, 1000);
 }
 
-// Handle when voice timer ends - wait for speech recognition if needed
 function handleTimerEnd() {
     console.log('Timer ended. Processing audio:', gameState.isProcessingAudio, 'Last speech:', gameState.lastSpeechTime);
     
-    // Mark that timer has ended - but DO NOT evaluate yet if still processing
     gameState.timerEnded = true;
     gameState.waitingForFinalResult = true;
     elements.phaseText.textContent = 'Processing your answer...';
     
-    // Check if we're still actively processing audio
-    // If we received speech input recently (within last 3 seconds), wait for it to finish
     const timeSinceLastSpeech = gameState.lastSpeechTime ? (Date.now() - gameState.lastSpeechTime) : Infinity;
     const isRecentlyActive = timeSinceLastSpeech < 3000;
     
@@ -576,8 +673,6 @@ function handleTimerEnd() {
     if (gameState.isProcessingAudio || isRecentlyActive) {
         console.log('Audio still being processed - waiting for recognition to complete');
         
-        // Start a check interval to wait for processing to complete
-        // This will keep checking until audio processing is done
         if (gameState.processingCheckInterval) {
             clearInterval(gameState.processingCheckInterval);
         }
@@ -588,30 +683,22 @@ function handleTimerEnd() {
             
             console.log('Checking processing status - isProcessing:', gameState.isProcessingAudio, 'timeSinceSpeech:', timeSinceSpeech);
             
-            // Only evaluate when:
-            // 1. Not currently processing audio AND
-            // 2. It's been at least 2 seconds since last speech input (give time to finalize)
             if (!gameState.isProcessingAudio && timeSinceSpeech >= 2000) {
                 clearInterval(gameState.processingCheckInterval);
                 gameState.processingCheckInterval = null;
                 
-                // Stop recognition to get final results
                 try {
                     gameState.recognition.stop();
-                } catch (e) {
-                    // Already stopped
-                }
+                } catch (e) {}
                 
-                // Give a moment for final results to come in, then evaluate
                 setTimeout(() => {
                     if (!gameState.isEvaluating) {
                         finalizeAndEvaluate();
                     }
                 }, 500);
             }
-        }, 200); // Check every 200ms
+        }, 200);
         
-        // Safety timeout - if still processing after 10 seconds, force evaluate
         setTimeout(() => {
             if (!gameState.isEvaluating && gameState.processingCheckInterval) {
                 console.log('Safety timeout - forcing evaluation');
@@ -628,16 +715,11 @@ function handleTimerEnd() {
             }
         }, 10000);
     } else {
-        // No recent audio activity - stop recognition and evaluate after brief wait
         console.log('No recent audio activity - stopping recognition');
         try {
             gameState.recognition.stop();
-        } catch (e) {
-            // Already stopped
-        }
+        } catch (e) {}
         
-        // The onend handler will trigger evaluation
-        // But add a fallback timeout just in case
         setTimeout(() => {
             if (!gameState.isEvaluating) {
                 finalizeAndEvaluate();
@@ -646,14 +728,12 @@ function handleTimerEnd() {
     }
 }
 
-// Final evaluation after all audio processing is complete
 function finalizeAndEvaluate() {
     if (gameState.isEvaluating) return;
     
     console.log('Finalizing evaluation with text:', gameState.recognizedText);
     gameState.waitingForFinalResult = false;
     
-    // Clean up any remaining intervals
     if (gameState.processingCheckInterval) {
         clearInterval(gameState.processingCheckInterval);
         gameState.processingCheckInterval = null;
@@ -663,7 +743,6 @@ function finalizeAndEvaluate() {
 }
 
 function evaluateAnswer() {
-    // Prevent multiple evaluations
     if (gameState.isEvaluating) {
         return;
     }
@@ -673,31 +752,24 @@ function evaluateAnswer() {
     console.log('Recognized text:', gameState.recognizedText);
     console.log('Correct answer detected:', gameState.correctAnswerDetected);
     
-    // Clear any pending timer
     if (gameState.timerInterval) {
         clearInterval(gameState.timerInterval);
         gameState.timerInterval = null;
     }
     
-    // Clear processing check interval
     if (gameState.processingCheckInterval) {
         clearInterval(gameState.processingCheckInterval);
         gameState.processingCheckInterval = null;
     }
     
-    // Stop speech recognition
     try {
         gameState.recognition.stop();
-    } catch (e) {
-        // Already stopped
-    }
+    } catch (e) {}
     
     const question = MOVIE_QUESTIONS[gameState.currentQuestionIndex];
     const userAnswer = gameState.recognizedText.toLowerCase().trim();
     const maxTimeMs = gameState.voiceTime * 1000;
     
-    // Use the pre-captured answer time if we detected a correct answer earlier
-    // This ensures we score based on when they FIRST said the correct answer
     const reactionTime = gameState.correctAnswerDetected ? gameState.answerTime : null;
     
     let result = {
@@ -712,7 +784,6 @@ function evaluateAnswer() {
     };
     
     if (userAnswer) {
-        // Check if answer matches using our helper function
         const isCorrect = checkAnswerMatch(userAnswer, question);
         
         if (isCorrect) {
@@ -724,7 +795,6 @@ function evaluateAnswer() {
             gameState.score += result.totalPoints;
             gameState.correctCount++;
             
-            // Trigger confetti celebration!
             console.log('Triggering confetti for correct answer!');
             setTimeout(() => triggerConfetti(), 100);
             
@@ -746,7 +816,6 @@ function evaluateAnswer() {
     gameState.results.push(result);
     elements.score.textContent = gameState.score;
     
-    // Move to next question after delay
     setTimeout(() => {
         gameState.currentQuestionIndex++;
         
@@ -786,23 +855,19 @@ function levenshteinSimilarity(s1, s2) {
     return (longer.length - costs[s2.length]) / longer.length;
 }
 
-// Check if user answer matches the question's acceptable answers
 function checkAnswerMatch(userAnswer, question) {
     const answer = userAnswer.toLowerCase().trim();
     if (!answer) return false;
     
     return question.acceptableAnswers.some(acceptable => {
-        // Direct match or partial match
         if (answer.includes(acceptable) || acceptable.includes(answer)) {
             return true;
         }
         
-        // Levenshtein similarity (fuzzy text matching)
         if (levenshteinSimilarity(answer, acceptable) > 0.7) {
             return true;
         }
         
-        // Phonetic matching (sounds similar)
         if (soundsLike(answer, acceptable)) {
             return true;
         }
@@ -819,7 +884,9 @@ function showFeedback(type, message) {
 function endGame() {
     gameState.isGameActive = false;
     
-    // Calculate max possible score (10 base + 5 max bonus per question)
+    // Save score to history
+    const scores = saveScore(gameState.score);
+    
     const maxPossibleScore = MOVIE_QUESTIONS.length * 15;
     
     // Update results screen
@@ -829,7 +896,6 @@ function endGame() {
     elements.incorrectCount.textContent = gameState.incorrectCount;
     elements.timeoutCount.textContent = gameState.timeoutCount;
     
-    // Calculate total time bonus earned
     const totalTimeBonus = gameState.results.reduce((sum, r) => sum + (r.timeBonus || 0), 0);
     
     // Performance message
@@ -851,7 +917,10 @@ function endGame() {
     }
     elements.performanceMessage.textContent = message;
     
-    // Build answers list with time bonus info
+    // Display previous scores
+    displayPreviousScores(scores);
+    
+    // Build answers list
     elements.answersList.innerHTML = gameState.results.map((result, index) => {
         const timeDisplay = result.reactionTime 
             ? `${(result.reactionTime / 1000).toFixed(1)}s` 
@@ -882,17 +951,69 @@ function endGame() {
     }).join('');
     
     showScreen(elements.resultsScreen);
+    
+    // Trigger confetti for good scores
+    if (percentage >= 70) {
+        setTimeout(() => triggerConfetti(), 500);
+    }
 }
 
-// Event Listeners
+function displayPreviousScores(scores) {
+    if (!scores || scores.length === 0) {
+        elements.previousScores.innerHTML = '<p class="no-previous-scores">No previous scores yet</p>';
+        return;
+    }
+    
+    elements.previousScores.innerHTML = scores.slice(0, 5).map((s, index) => {
+        const date = new Date(s.date);
+        const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const isCurrent = index === 0;
+        
+        return `
+            <div class="previous-score-item ${isCurrent ? 'current' : ''}">
+                <span class="previous-score-value">${s.score}</span>
+                <span class="previous-score-date">${isCurrent ? 'Now' : dateStr}</span>
+            </div>
+        `;
+    }).join('');
+}
+
+// ============================================
+// EVENT LISTENERS
+// ============================================
+
+// Start button
 elements.startBtn.addEventListener('click', () => {
     if (initSpeechRecognition()) {
         startGame();
     }
 });
 
+// Play again button - goes back to home
 elements.playAgainBtn.addEventListener('click', () => {
     showScreen(elements.startScreen);
+});
+
+// Settings button
+elements.settingsBtn.addEventListener('click', openSettings);
+
+// Close settings
+elements.closeSettings.addEventListener('click', closeSettingsModal);
+
+// Close modal on backdrop click
+elements.settingsModal.querySelector('.modal-backdrop').addEventListener('click', closeSettingsModal);
+
+// Save settings
+elements.saveSettings.addEventListener('click', () => {
+    saveSettingsToStorage();
+    closeSettingsModal();
+});
+
+// Clear data
+elements.clearDataBtn.addEventListener('click', () => {
+    if (confirm('Are you sure you want to clear all scores and settings?')) {
+        clearAllData();
+    }
 });
 
 // Input validation
@@ -908,6 +1029,23 @@ elements.voiceTimeInput.addEventListener('change', () => {
     if (value > 15) elements.voiceTimeInput.value = 15;
 });
 
+// Settings input buttons functionality
+document.querySelectorAll('.input-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const targetId = btn.dataset.target;
+        const input = document.getElementById(targetId);
+        const currentValue = parseInt(input.value) || 3;
+        const min = parseInt(input.min) || 3;
+        const max = parseInt(input.max) || 15;
+        
+        if (btn.classList.contains('plus')) {
+            input.value = Math.min(currentValue + 1, max);
+        } else {
+            input.value = Math.max(currentValue - 1, min);
+        }
+    });
+});
+
 // Prevent leaving page during game
 window.addEventListener('beforeunload', (e) => {
     if (gameState.isGameActive) {
@@ -916,7 +1054,10 @@ window.addEventListener('beforeunload', (e) => {
     }
 });
 
-// Confetti System
+// ============================================
+// CONFETTI SYSTEM
+// ============================================
+
 class ConfettiSystem {
     constructor() {
         this.canvas = document.getElementById('confetti-canvas');
@@ -978,7 +1119,7 @@ class ConfettiSystem {
             p.y += p.speedY;
             p.x += p.speedX;
             p.rotation += p.rotationSpeed;
-            p.speedY += 0.1; // gravity
+            p.speedY += 0.1;
             p.opacity -= 0.005;
 
             if (p.y > this.canvas.height || p.opacity <= 0) return false;
@@ -1011,26 +1152,15 @@ class ConfettiSystem {
 
 const confetti = new ConfettiSystem();
 
-// Trigger confetti on correct answer
 function triggerConfetti() {
     confetti.burst(80);
 }
 
-// Settings input buttons functionality
-document.querySelectorAll('.input-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        const targetId = btn.dataset.target;
-        const input = document.getElementById(targetId);
-        const currentValue = parseInt(input.value) || 3;
-        const min = parseInt(input.min) || 3;
-        const max = parseInt(input.max) || 15;
-        
-        if (btn.classList.contains('plus')) {
-            input.value = Math.min(currentValue + 1, max);
-        } else {
-            input.value = Math.max(currentValue - 1, min);
-        }
-    });
-});
+// ============================================
+// INITIALIZATION
+// ============================================
+
+// Load saved settings on page load
+loadSettings();
 
 console.log('🎬 Emoji Movie Guessing Game loaded!');
