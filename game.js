@@ -79,6 +79,7 @@ class GameState {
         this.correctAnswerDetected = false; // Track if we already detected a correct answer
         this.isEvaluating = false; // Prevent multiple evaluations
         this.waitingForFinalResult = false; // Track if we're waiting for final speech result
+        this.hasReceivedFinalConfirmation = false; // Track if we have full confirmation
     }
 
     reset() {
@@ -96,6 +97,7 @@ class GameState {
         this.correctAnswerDetected = false;
         this.isEvaluating = false;
         this.waitingForFinalResult = false;
+        this.hasReceivedFinalConfirmation = false;
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
             this.timerInterval = null;
@@ -290,21 +292,23 @@ function initSpeechRecognition() {
     gameState.recognition.onresult = (event) => {
         let finalTranscript = '';
         let interimTranscript = '';
-        let hasFinalResult = false;
         
-        for (let i = event.resultIndex; i < event.results.length; i++) {
+        // Accumulate ALL results to get the full transcript
+        for (let i = 0; i < event.results.length; i++) {
             const transcript = event.results[i][0].transcript;
             if (event.results[i].isFinal) {
-                finalTranscript += transcript;
-                hasFinalResult = true;
+                finalTranscript += transcript + ' ';
             } else {
-                interimTranscript += transcript;
+                interimTranscript += transcript + ' ';
             }
         }
         
-        const newText = finalTranscript || interimTranscript;
-        gameState.recognizedText = newText;
-        elements.recognizedText.textContent = `"${gameState.recognizedText}"`;
+        // Combine final and interim to show everything the user has said
+        const newText = (finalTranscript + interimTranscript).trim();
+        if (newText) {
+            gameState.recognizedText = newText;
+            elements.recognizedText.textContent = `"${gameState.recognizedText}"`;
+        }
         
         // Check if the recognized text matches the correct answer
         if (newText && gameState.voicePhaseStartTime && !gameState.correctAnswerDetected) {
@@ -314,14 +318,13 @@ function initSpeechRecognition() {
                 gameState.answerTime = Date.now() - gameState.voicePhaseStartTime;
                 gameState.correctAnswerDetected = true;
                 console.log(`Correct answer detected at ${gameState.answerTime}ms`);
+                // Mark that we received confirmation of the answer
+                gameState.hasReceivedFinalConfirmation = true;
             }
         }
         
-        // If we have a final result and we're waiting for it, evaluate now
-        if (hasFinalResult && gameState.waitingForFinalResult && !gameState.isEvaluating) {
-            gameState.waitingForFinalResult = false;
-            evaluateAnswer();
-        }
+        // Don't immediately evaluate on final result - let the timeout handle it
+        // This gives more time for the complete phrase to be recognized
     };
     
     gameState.recognition.onerror = (event) => {
@@ -393,6 +396,7 @@ function showQuestion() {
     gameState.correctAnswerDetected = false;
     gameState.isEvaluating = false;
     gameState.waitingForFinalResult = false;
+    gameState.hasReceivedFinalConfirmation = false;
     
     // Start guess phase
     startGuessPhase();
@@ -439,6 +443,7 @@ function startVoicePhase() {
     gameState.correctAnswerDetected = false;
     gameState.isEvaluating = false;
     gameState.waitingForFinalResult = false;
+    gameState.hasReceivedFinalConfirmation = false;
     let timeLeft = gameState.voiceTime;
     
     // Update UI for voice phase
@@ -481,21 +486,38 @@ function startVoicePhase() {
 // Handle when voice timer ends - wait for speech recognition if needed
 function handleTimerEnd() {
     // If we've already detected a correct answer or have recognized text,
-    // wait a short time for speech recognition to finalize
+    // wait for speech recognition to finalize
     if (gameState.recognizedText && !gameState.isEvaluating) {
         gameState.waitingForFinalResult = true;
-        elements.phaseText.textContent = 'Processing...';
+        elements.phaseText.textContent = 'Processing your answer...';
         
-        // Give speech recognition a brief window to finalize
+        // Stop recognition to force finalization
+        try {
+            gameState.recognition.stop();
+        } catch (e) {
+            // Already stopped
+        }
+        
+        // Give speech recognition time to finalize the complete phrase
+        // Use longer delay to ensure all speech is captured
+        setTimeout(() => {
+            if (!gameState.isEvaluating) {
+                gameState.waitingForFinalResult = false;
+                console.log('Evaluating with text:', gameState.recognizedText);
+                evaluateAnswer();
+            }
+        }, 2000); // Wait 2 seconds for complete recognition
+    } else {
+        // No recognized text, wait a moment in case speech is still being processed
+        gameState.waitingForFinalResult = true;
+        elements.phaseText.textContent = 'Listening...';
+        
         setTimeout(() => {
             if (!gameState.isEvaluating) {
                 gameState.waitingForFinalResult = false;
                 evaluateAnswer();
             }
-        }, 1500); // Wait up to 1.5 seconds for final result
-    } else {
-        // No recognized text, evaluate immediately
-        evaluateAnswer();
+        }, 1000);
     }
 }
 
