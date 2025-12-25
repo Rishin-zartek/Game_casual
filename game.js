@@ -661,7 +661,7 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                 // If fetch fails, provide a more helpful error message
                 const errorMessage = error?.message || error?.toString() || 'Unknown error';
                 loadingLogger.log('error', `Fetch request failed: ${errorMessage}`);
-                if ((errorMessage && errorMessage.includes('Failed to fetch')) || error.name === 'TypeError') {
+                if ((errorMessage && typeof errorMessage === 'string' && errorMessage.includes('Failed to fetch')) || error.name === 'TypeError') {
                     throw new Error('Network error: Could not connect to Google Cloud STT. This may be due to CORS restrictions or network issues. Please check your internet connection and ensure the API key is valid.');
                 }
                 throw error;
@@ -707,12 +707,15 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             if (this.onError) {
                 let userFriendlyError = errorMessage;
                 
-                if (errorMessage && (errorMessage.includes('API key') || errorMessage.includes('403') || errorMessage.includes('401'))) {
-                    userFriendlyError = 'Invalid API key. Please check your Google Cloud API key in settings.';
-                } else if (errorMessage && (errorMessage.includes('Failed to fetch') || errorMessage.includes('Network error'))) {
-                    userFriendlyError = 'Network error: Could not connect to Google Cloud STT. Please check your internet connection and API key.';
-                } else if (errorMessage && errorMessage.includes('CORS')) {
-                    userFriendlyError = 'CORS error: The API may not be accessible from this origin. Please check your API key and CORS settings.';
+                // Safe check before using includes
+                if (errorMessage && typeof errorMessage === 'string') {
+                    if (errorMessage.includes('API key') || errorMessage.includes('403') || errorMessage.includes('401')) {
+                        userFriendlyError = 'Invalid API key. Please check your Google Cloud API key in settings.';
+                    } else if (errorMessage.includes('Failed to fetch') || errorMessage.includes('Network error')) {
+                        userFriendlyError = 'Network error: Could not connect to Google Cloud STT. Please check your internet connection and API key.';
+                    } else if (errorMessage.includes('CORS')) {
+                        userFriendlyError = 'CORS error: The API may not be accessible from this origin. Please check your API key and CORS settings.';
+                    }
                 }
                 
                 this.onError(new Error(userFriendlyError));
@@ -1224,12 +1227,13 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
     
     async startWebSocket() {
         try {
-            // ElevenLabs Speech-to-Text Streaming WebSocket API
+            // ElevenLabs Speech-to-Text Realtime WebSocket API (Scribe v2)
             // Based on: https://elevenlabs.io/docs/developers/guides/cookbooks/speech-to-text/streaming
-            // API key is passed as query parameter or in the first message
-            const wsUrl = `wss://api.elevenlabs.io/v1/speech-to-text/stream?model_id=eleven_multilingual_v2&xi-api-key=${encodeURIComponent(this.apiKey)}`;
+            // For Scribe v2, use /realtime endpoint with model_id and token as query parameters
+            const modelId = "scribe_v2";
+            const wsUrl = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=${modelId}&token=${encodeURIComponent(this.apiKey)}`;
             
-            loadingLogger.log('info', 'Connecting to ElevenLabs WebSocket...');
+            loadingLogger.log('info', 'Connecting to ElevenLabs Scribe v2 WebSocket...');
             
             // Wait for connection to open
             await new Promise((resolve, reject) => {
@@ -1242,17 +1246,8 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
                 this.ws.onopen = () => {
                     clearTimeout(timeout);
                     loadingLogger.log('success', 'WebSocket connection opened');
-                    console.log('ElevenLabs WebSocket connected');
-                    
-                    // Send configuration message
-                    const config = {
-                        type: 'config',
-                        language: 'en',
-                        model: 'eleven_multilingual_v2'
-                    };
-                    
-                    this.ws.send(JSON.stringify(config));
-                    loadingLogger.log('info', 'Sent configuration to ElevenLabs');
+                    console.log('✅ Connected to Scribe v2');
+                    // No config message needed for Scribe v2 - connection is ready
                     resolve();
                 };
                 
@@ -1277,8 +1272,9 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
                 
                 this.ws.onerror = (event) => {
                     clearTimeout(timeout);
-                    console.error('WebSocket error:', event);
+                    console.error('❌ Socket Error', event);
                     // WebSocket onerror receives an ErrorEvent, not an Error object
+                    // Safe check to prevent undefined crashes
                     const errorMessage = event?.message || event?.error?.message || event?.error?.toString() || event?.toString() || 'Unknown error';
                     loadingLogger.log('error', `WebSocket error: ${errorMessage}`);
                     reject(event?.error instanceof Error ? event.error : new Error(errorMessage));
@@ -1294,7 +1290,11 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
                     if (this.isListening && closeCode !== 1000) {
                         // Unexpected close, notify error
                         if (this.onError) {
-                            this.onError(new Error('WebSocket connection closed unexpectedly'));
+                            if (closeCode === 1006) {
+                                this.onError(new Error('Connection closed (1006). Check API Key or Audio Format.'));
+                            } else {
+                                this.onError(new Error('WebSocket connection closed unexpectedly'));
+                            }
                         }
                     }
                 };
@@ -1307,10 +1307,13 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
             if (this.onError) {
                 let userFriendlyError = errorMessage;
                 
-                if (errorMessage && (errorMessage.includes('API key') || errorMessage.includes('403') || errorMessage.includes('401'))) {
-                    userFriendlyError = 'Invalid API key. Please check your ElevenLabs API key in settings.';
-                } else if (errorMessage && (errorMessage.includes('Failed to fetch') || errorMessage.includes('Network error'))) {
-                    userFriendlyError = 'Network error: Could not connect to ElevenLabs. Please check your internet connection and API key.';
+                // Safe check before using includes
+                if (errorMessage && typeof errorMessage === 'string') {
+                    if (errorMessage.includes('API key') || errorMessage.includes('403') || errorMessage.includes('401')) {
+                        userFriendlyError = 'Invalid API key. Please check your ElevenLabs API key in settings.';
+                    } else if (errorMessage.includes('Failed to fetch') || errorMessage.includes('Network error')) {
+                        userFriendlyError = 'Network error: Could not connect to ElevenLabs. Please check your internet connection and API key.';
+                    }
                 }
                 
                 this.onError(new Error(userFriendlyError));
@@ -1330,14 +1333,17 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
             return;
         }
         
-        // Handle different message types from ElevenLabs STT API
-        // The API may return different formats, so we check multiple possibilities
+        // Handle Scribe v2 message types
+        // Scribe v2 uses partial_transcription and final_transcription types
         
         let transcript = null;
         let isFinal = false;
         
-        // Check for transcript in various formats
-        if (data.transcript) {
+        // Check for Scribe v2 message format
+        if (data.type === 'partial_transcription' || data.type === 'final_transcription') {
+            transcript = data.text || data.transcript;
+            isFinal = data.type === 'final_transcription';
+        } else if (data.transcript) {
             transcript = data.transcript;
             isFinal = data.is_final === true || data.final === true;
         } else if (data.text) {
@@ -1346,16 +1352,13 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
         } else if (data.message && typeof data.message === 'string') {
             transcript = data.message;
             isFinal = data.is_final === true || data.final === true;
-        } else if (data.type === 'transcript' && data.data) {
-            transcript = data.data;
-            isFinal = data.is_final === true || data.final === true;
         }
         
         // Process transcript if found
         if (transcript && typeof transcript === 'string' && transcript.trim()) {
             const trimmedTranscript = transcript.trim();
             if (this.onResult) {
-                console.log(`ElevenLabs STT ${isFinal ? 'final' : 'interim'} result:`, trimmedTranscript);
+                console.log(`User is saying: ${trimmedTranscript}`);
                 loadingLogger.log('info', `Received ${isFinal ? 'final' : 'interim'} transcript: "${trimmedTranscript}"`);
                 this.onResult(trimmedTranscript, isFinal);
             }
@@ -1375,16 +1378,16 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
         
         try {
             // Convert Int16Array to base64
-            // ElevenLabs STT API expects base64-encoded PCM audio
+            // Scribe v2 expects base64-encoded audio in JSON format
             const base64Audio = this.int16ToBase64(audioData);
             
-            // Send audio data message
-            // Format may vary, but typically JSON with base64 audio
+            // Send audio data message in Scribe v2 format
+            // CRITICAL: Send JSON, not raw binary
             const audioMessage = {
-                type: 'audio',
-                audio: base64Audio,
-                format: 'pcm',
-                sample_rate: 16000
+                audio_event: {
+                    audio_base_64: base64Audio,
+                    event_time_ms: Date.now()
+                }
             };
             
             this.ws.send(JSON.stringify(audioMessage));
