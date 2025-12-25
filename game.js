@@ -1263,6 +1263,8 @@ const elements = {
     micIndicator: document.getElementById('mic-indicator'),
     recognizedText: document.getElementById('recognized-text'),
     feedback: document.getElementById('feedback'),
+    nextPuzzleBtn: document.getElementById('next-puzzle-btn'),
+    startAfterCountdownBtn: document.getElementById('start-after-countdown-btn'),
     
     // Results screen
     finalScore: document.getElementById('final-score'),
@@ -1621,6 +1623,11 @@ function runCountdown(callback) {
     let count = 3;
     elements.countdownNumber.textContent = count;
     
+    // Hide the start button initially
+    if (elements.startAfterCountdownBtn) {
+        elements.startAfterCountdownBtn.style.display = 'none';
+    }
+    
     const countdownInterval = setInterval(() => {
         count--;
         if (count > 0) {
@@ -1633,10 +1640,23 @@ function runCountdown(callback) {
         } else if (count === 0) {
             elements.countdownNumber.textContent = 'GO!';
             elements.countdownNumber.style.color = '#10b981';
-        } else {
             clearInterval(countdownInterval);
-            elements.countdownNumber.style.color = '';
-            callback();
+            
+            // Show the start button instead of auto-proceeding
+            if (elements.startAfterCountdownBtn) {
+                elements.startAfterCountdownBtn.style.display = 'inline-flex';
+                // Store callback to be called when button is clicked
+                elements.startAfterCountdownBtn.onclick = () => {
+                    elements.countdownNumber.style.color = '';
+                    callback();
+                };
+            } else {
+                // Fallback: auto-proceed if button doesn't exist
+                setTimeout(() => {
+                    elements.countdownNumber.style.color = '';
+                    callback();
+                }, 500);
+            }
         }
     }, 1000);
 }
@@ -1687,6 +1707,11 @@ function showQuestion() {
     elements.feedback.className = 'feedback';
     elements.feedback.textContent = '';
     
+    // Hide next puzzle button
+    if (elements.nextPuzzleBtn) {
+        elements.nextPuzzleBtn.style.display = 'none';
+    }
+    
     // Reset state for this question
     gameState.recognizedText = '';
     gameState.answerTime = null;
@@ -1703,6 +1728,16 @@ function showQuestion() {
     }
     
     startGuessPhase();
+}
+
+function proceedToNextQuestion() {
+    gameState.currentQuestionIndex++;
+    
+    if (gameState.currentQuestionIndex >= MOVIE_QUESTIONS.length) {
+        endGame();
+    } else {
+        showQuestion();
+    }
 }
 
 function startGuessPhase() {
@@ -1816,8 +1851,15 @@ function handleTimerEnd() {
     
     gameState.timerEnded = true;
     gameState.waitingForFinalResult = true;
-    elements.phaseText.textContent = 'Processing your answer...';
+    elements.phaseText.textContent = 'Time\'s up!';
     
+    // Stop the timer display
+    elements.timer.textContent = '0';
+    
+    // Stop speech recognition
+    speechEngine.stop();
+    
+    // Process any remaining audio, then show the button
     const timeSinceLastSpeech = gameState.lastSpeechTime ? (Date.now() - gameState.lastSpeechTime) : Infinity;
     const isRecentlyActive = timeSinceLastSpeech < 3000;
     
@@ -1836,46 +1878,56 @@ function handleTimerEnd() {
             
             console.log('Checking processing status - isProcessing:', gameState.isProcessingAudio, 'timeSinceSpeech:', timeSinceSpeech);
             
-            // Reduced from 2000ms to 1000ms for faster finalization
             if (!gameState.isProcessingAudio && timeSinceSpeech >= 1000) {
                 clearInterval(gameState.processingCheckInterval);
                 gameState.processingCheckInterval = null;
                 
                 speechEngine.stop();
                 
-                // Reduced from 500ms to 200ms
                 setTimeout(() => {
                     if (!gameState.isEvaluating) {
-                        finalizeAndEvaluate();
+                        showNextPuzzleButton();
                     }
                 }, 200);
             }
         }, 200);
         
-        // Reduced safety timeout from 10s to 3s for faster response
+        // Safety timeout
         setTimeout(() => {
             if (!gameState.isEvaluating && gameState.processingCheckInterval) {
-                console.log('Safety timeout - forcing evaluation');
+                console.log('Safety timeout - showing next puzzle button');
                 clearInterval(gameState.processingCheckInterval);
                 gameState.processingCheckInterval = null;
                 speechEngine.stop();
                 setTimeout(() => {
                     if (!gameState.isEvaluating) {
-                        finalizeAndEvaluate();
+                        showNextPuzzleButton();
                     }
                 }, 300);
             }
         }, 3000);
     } else {
-        console.log('No recent audio activity - stopping recognition');
+        console.log('No recent audio activity - showing next puzzle button');
         speechEngine.stop();
         
-        // Reduced from 1500ms to 500ms for faster response
         setTimeout(() => {
             if (!gameState.isEvaluating) {
-                finalizeAndEvaluate();
+                showNextPuzzleButton();
             }
         }, 500);
+    }
+}
+
+function showNextPuzzleButton() {
+    // Evaluate the answer first
+    if (!gameState.isEvaluating) {
+        finalizeAndEvaluate();
+    }
+    
+    // Show the next puzzle button
+    if (elements.nextPuzzleBtn) {
+        elements.nextPuzzleBtn.style.display = 'inline-flex';
+        elements.nextPuzzleBtn.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
 }
 
@@ -1965,15 +2017,8 @@ function evaluateAnswer() {
     gameState.results.push(result);
     elements.score.textContent = gameState.score;
     
-    setTimeout(() => {
-        gameState.currentQuestionIndex++;
-        
-        if (gameState.currentQuestionIndex >= MOVIE_QUESTIONS.length) {
-            endGame();
-        } else {
-            showQuestion();
-        }
-    }, 2500);
+    // Don't auto-advance - wait for button click
+    // The button will call proceedToNextQuestion() when clicked
 }
 
 // Levenshtein distance for fuzzy matching
@@ -2143,6 +2188,13 @@ elements.startBtn.addEventListener('click', async () => {
 elements.playAgainBtn.addEventListener('click', () => {
     showScreen(elements.startScreen);
 });
+
+// Next puzzle button - proceeds to next question
+if (elements.nextPuzzleBtn) {
+    elements.nextPuzzleBtn.addEventListener('click', () => {
+        proceedToNextQuestion();
+    });
+}
 
 // Settings button
 elements.settingsBtn.addEventListener('click', openSettings);

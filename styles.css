@@ -540,6 +540,21 @@ body {
     margin-top: 10px;
 }
 
+#start-after-countdown-btn {
+    animation: fadeInButton 0.5s ease-out;
+}
+
+@keyframes fadeInButton {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
 /* ============================================
    GAME SCREEN
    ============================================ */
@@ -696,6 +711,24 @@ body {
     gap: 8px;
     min-height: 70px;
     flex-shrink: 0;
+}
+
+/* Next Puzzle Button */
+.next-puzzle-btn {
+    margin-top: 12px;
+    width: 100%;
+    animation: slideUpButton 0.3s ease-out;
+}
+
+@keyframes slideUpButton {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .mic-indicator {
