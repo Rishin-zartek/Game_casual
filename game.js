@@ -652,8 +652,7 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                 },
                 body: stream,
                 cache: 'no-cache',
-                // Note: duplex: 'half' is experimental and not widely supported
-                // We'll try without it first
+                duplex: 'half' // Required for streaming request bodies
             }).catch(error => {
                 // If fetch fails, provide a more helpful error message
                 loadingLogger.log('error', `Fetch request failed: ${error.message}`);
