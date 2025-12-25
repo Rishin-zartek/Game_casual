@@ -79,6 +79,8 @@ Then open `http://localhost:8000` in your browser.
 - `index.html` - Main HTML structure
 - `styles.css` - Modern CSS styling with animations
 - `game.js` - Game logic and speech recognition
+- `ELEVENLABS_IMPLEMENTATION_GUIDE.md` - Comprehensive guide for implementing ElevenLabs Scribe v2 Realtime API
+- `elevenlabs-scribe-v2-example.html` - Standalone example demonstrating microphone access, 16kHz downsampling, and WebSocket streaming
 
 ### Technologies Used
 
@@ -87,6 +89,31 @@ Then open `http://localhost:8000` in your browser.
 - **JavaScript (ES6+)** - Classes, Arrow functions, Template literals
 - **Google Cloud Speech-to-Text RPC** - Streaming RPC API for high-quality speech recognition
 - **Web Speech API** - Browser-based speech recognition (fallback option)
+- **ElevenLabs Scribe v2** - Realtime streaming speech-to-text via WebSocket
+
+## 📚 Implementation Guides
+
+### ElevenLabs Scribe v2 Realtime API
+
+For developers looking to implement microphone access, audio downsampling to 16kHz, and WebSocket streaming:
+
+- **[ELEVENLABS_IMPLEMENTATION_GUIDE.md](./ELEVENLABS_IMPLEMENTATION_GUIDE.md)** - Complete implementation guide covering:
+  - Microphone access and permissions
+  - AudioContext configuration for 16kHz
+  - Float32 to Int16 PCM conversion
+  - Base64 encoding
+  - WebSocket connection and authentication
+  - Audio chunk streaming
+  - Transcript handling
+  - Common issues and solutions
+
+- **[elevenlabs-scribe-v2-example.html](./elevenlabs-scribe-v2-example.html)** - Standalone working example demonstrating all concepts
+
+**Key Implementation Points:**
+- Browser WebSockets cannot set custom headers - use query parameter: `&xi_api_key=YOUR_KEY`
+- AudioContext must be explicitly configured for 16kHz sample rate
+- Convert Float32Array to Int16 PCM format
+- Encode audio chunks as base64 in JSON messages
 
 ### Browser Compatibility
 
