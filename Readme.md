@@ -87,6 +87,7 @@ Then open `http://localhost:8000` in your browser.
 - **JavaScript (ES6+)** - Classes, Arrow functions, Template literals
 - **Google Cloud Speech-to-Text RPC** - Streaming RPC API for high-quality speech recognition
 - **Web Speech API** - Browser-based speech recognition (fallback option)
+- **ElevenLabs Scribe v2** - Realtime streaming speech-to-text via WebSocket
 
 ### Browser Compatibility
 

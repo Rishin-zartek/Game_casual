@@ -1271,15 +1271,11 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
                 
                 try {
                     const inputData = event.inputBuffer.getChannelData(0);
-                    // Convert Float32Array to Int16Array for ElevenLabs API
-                    const int16Data = new Int16Array(inputData.length);
-                    for (let i = 0; i < inputData.length; i++) {
-                        const s = Math.max(-1, Math.min(1, inputData[i]));
-                        int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                    }
+                    // Convert Float32Array to Int16 PCM (required by ElevenLabs)
+                    const pcmData = this.floatTo16BitPCM(inputData);
                     
                     // Send audio chunk via WebSocket
-                    this.sendAudioChunk(int16Data);
+                    this.sendAudioChunk(pcmData);
                 } catch (error) {
                     console.error('Audio processing failed', error);
                     const errorMessage = error?.message || error?.toString() || 'Unknown error';
@@ -1307,15 +1303,15 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
     async startWebSocket() {
         try {
             // ElevenLabs Speech-to-Text Realtime WebSocket API (Scribe v2)
-            // Based on: https://elevenlabs.io/docs/developers/guides/cookbooks/speech-to-text/streaming
-            // Step 1: Create a token first (required before connecting)
-            loadingLogger.log('info', 'Creating token for ElevenLabs WebSocket connection...');
-            const token = await this.createToken();
+            // Browser WebSockets cannot set custom headers, so we use query parameter for API key
+            if (!this.apiKey || this.apiKey.trim().length === 0) {
+                throw new Error('API key required for WebSocket connection');
+            }
             
-            // Step 2: Connect to WebSocket using the token
-            // For Scribe v2, use /realtime endpoint with model_id and token as query parameters
+            // Connect to WebSocket using API key directly in query parameter
+            // For Scribe v2, use /realtime endpoint with model_id, audio_format, and xi_api_key as query parameters
             const modelId = "scribe_v2_realtime";
-            const wsUrl = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=${modelId}&token=${encodeURIComponent(token)}`;
+            const wsUrl = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=${modelId}&audio_format=pcm_16000&xi_api_key=${encodeURIComponent(this.apiKey)}`;
             
             loadingLogger.log('info', 'Connecting to ElevenLabs Scribe v2 WebSocket...');
             
@@ -1418,85 +1414,88 @@ class ElevenLabsSpeechEngine extends SpeechEngineInterface {
         }
         
         // Handle Scribe v2 message types
-        // Scribe v2 uses partial_transcription and final_transcription types
-        
-        let transcript = null;
-        let isFinal = false;
-        
-        // Check for Scribe v2 message format
-        if (data.type === 'partial_transcription' || data.type === 'final_transcription') {
-            transcript = data.text || data.transcript;
-            isFinal = data.type === 'final_transcription';
-        } else if (data.transcript) {
-            transcript = data.transcript;
-            isFinal = data.is_final === true || data.final === true;
-        } else if (data.text) {
-            transcript = data.text;
-            isFinal = data.is_final === true || data.final === true;
-        } else if (data.message && typeof data.message === 'string') {
-            transcript = data.message;
-            isFinal = data.is_final === true || data.final === true;
-        }
-        
-        // Process transcript if found
-        if (transcript && typeof transcript === 'string' && transcript.trim()) {
-            const trimmedTranscript = transcript.trim();
-            if (this.onResult) {
-                console.log(`User is saying: ${trimmedTranscript}`);
-                loadingLogger.log('info', `Received ${isFinal ? 'final' : 'interim'} transcript: "${trimmedTranscript}"`);
-                this.onResult(trimmedTranscript, isFinal);
+        // Handle Partial Transcripts
+        if (data.type === "partial_transcript" || data.type === "partial_transcription") {
+            const partialText = data.text || data.transcript || "";
+            if (partialText && this.onResult) {
+                loadingLogger.log('info', `Received partial transcript: "${partialText}"`);
+                this.onResult(partialText, false);
             }
-        } else if (data.type === 'config' || data.type === 'ready' || data.status === 'connected') {
-            // Configuration/connection confirmation messages
-            loadingLogger.log('info', 'ElevenLabs WebSocket connection confirmed');
-        } else {
-            // Log unknown message format for debugging
-            loadingLogger.log('info', 'Received WebSocket message:', JSON.stringify(data).substring(0, 200));
+            return;
         }
+        
+        // Handle Final/Committed Transcripts
+        if (data.type === "final_transcript" || 
+            data.type === "final_transcription" ||
+            data.type === "word" || 
+            data.message_type === "committed_transcript_with_timestamps") {
+            const finalText = data.text || data.transcript || "";
+            if (finalText && this.onResult) {
+                loadingLogger.log('info', `Received final transcript: "${finalText}"`);
+                this.onResult(finalText, true);
+            }
+            return;
+        }
+        
+        // Handle connection confirmation messages
+        if (data.type === 'config' || data.type === 'ready' || data.status === 'connected') {
+            loadingLogger.log('info', 'ElevenLabs WebSocket connection confirmed');
+            return;
+        }
+        
+        // Log unknown message format for debugging
+        loadingLogger.log('info', 'Received WebSocket message:', JSON.stringify(data).substring(0, 200));
     }
     
-    sendAudioChunk(audioData) {
+    floatTo16BitPCM(input) {
+        // Convert Float32 (Browser Audio) to Int16 (PCM)
+        let output = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+            // Clamp value between -1 and 1
+            let s = Math.max(-1, Math.min(1, input[i]));
+            // Convert to 16-bit integer
+            // Negative values: multiply by 0x8000 (32768)
+            // Positive values: multiply by 0x7FFF (32767)
+            output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        return output.buffer; // Return ArrayBuffer
+    }
+    
+    arrayBufferToBase64(buffer) {
+        // Helper: ArrayBuffer to Base64
+        let binary = '';
+        let bytes = new Uint8Array(buffer);
+        let len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return window.btoa(binary);
+    }
+    
+    sendAudioChunk(pcmBuffer) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             return;
         }
         
         try {
-            // Convert Int16Array to base64
-            // Scribe v2 expects base64-encoded audio in JSON format
-            const base64Audio = this.int16ToBase64(audioData);
+            // Convert ArrayBuffer to base64
+            const base64Audio = this.arrayBufferToBase64(pcmBuffer);
             
             // Send audio data message in Scribe v2 format
             // CRITICAL: Send JSON, not raw binary
-            const audioMessage = {
-                audio_event: {
-                    audio_base_64: base64Audio,
-                    event_time_ms: Date.now()
-                }
+            // Format: { message_type: "input_audio_chunk", audio_base_64: "...", commit: false }
+            const message = {
+                message_type: "input_audio_chunk",
+                audio_base_64: base64Audio,
+                commit: false  // Set to true if you want to force commit, usually false for streaming
             };
             
-            this.ws.send(JSON.stringify(audioMessage));
+            this.ws.send(JSON.stringify(message));
         } catch (error) {
             console.error('Failed to send audio chunk:', error);
             const errorMessage = error?.message || error?.toString() || 'Unknown error';
             loadingLogger.log('error', `Failed to send audio chunk: ${errorMessage}`);
         }
-    }
-    
-    int16ToBase64(int16Array) {
-        // Convert Int16Array to ArrayBuffer, then to base64
-        const buffer = new ArrayBuffer(int16Array.length * 2);
-        const view = new DataView(buffer);
-        for (let i = 0; i < int16Array.length; i++) {
-            view.setInt16(i * 2, int16Array[i], true); // littleEndian
-        }
-        
-        // Convert to base64
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        return btoa(binary);
     }
     
     stop() {
