@@ -76,9 +76,17 @@ class LoadingLogger {
         this.logsContent = null;
         this.showLogsBtn = null;
         this.isExpanded = false;
+        this.isVisible = false; // Persistent logs visibility
+        this.enabledLevels = {
+            info: true,
+            success: true,
+            warning: true,
+            error: true
+        };
     }
     
     init() {
+        // Loading overlay logs panel
         this.logsPanel = document.getElementById('logs-panel');
         this.logsContent = document.getElementById('logs-content');
         this.showLogsBtn = document.getElementById('show-logs-btn');
@@ -92,8 +100,124 @@ class LoadingLogger {
             clearLogsBtn.addEventListener('click', () => this.clearLogs());
         }
         
+        // Persistent logs panel (in game container)
+        this.initPersistentLogs();
+        
+        // Load saved settings
+        this.loadSettings();
+        
         // Log initial browser info
         this.logBrowserInfo();
+    }
+    
+    initPersistentLogs() {
+        // Create persistent logs panel if it doesn't exist
+        let persistentPanel = document.getElementById('persistent-logs-panel');
+        if (!persistentPanel) {
+            persistentPanel = document.createElement('div');
+            persistentPanel.id = 'persistent-logs-panel';
+            persistentPanel.className = 'persistent-logs-panel';
+            persistentPanel.innerHTML = `
+                <div class="persistent-logs-header">
+                    <span>📋 Game Logs</span>
+                    <div class="logs-controls">
+                        <div class="log-level-filters">
+                            <button class="level-filter-btn active" data-level="info" title="Info">ℹ️</button>
+                            <button class="level-filter-btn active" data-level="success" title="Success">✅</button>
+                            <button class="level-filter-btn active" data-level="warning" title="Warning">⚠️</button>
+                            <button class="level-filter-btn active" data-level="error" title="Error">❌</button>
+                        </div>
+                        <button id="persistent-clear-logs-btn" class="clear-logs-btn">Clear</button>
+                        <button id="persistent-close-logs-btn" class="close-logs-btn">✕</button>
+                    </div>
+                </div>
+                <div id="persistent-logs-content" class="persistent-logs-content"></div>
+            `;
+            document.body.appendChild(persistentPanel);
+        }
+        
+        this.persistentLogsContent = document.getElementById('persistent-logs-content');
+        
+        // Level filter buttons
+        const levelFilters = persistentPanel.querySelectorAll('.level-filter-btn');
+        levelFilters.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const level = btn.dataset.level;
+                this.enabledLevels[level] = !this.enabledLevels[level];
+                btn.classList.toggle('active', this.enabledLevels[level]);
+                this.renderAllLogs();
+                this.saveSettings();
+            });
+        });
+        
+        // Clear button
+        const persistentClearBtn = document.getElementById('persistent-clear-logs-btn');
+        if (persistentClearBtn) {
+            persistentClearBtn.addEventListener('click', () => this.clearLogs());
+        }
+        
+        // Close button
+        const persistentCloseBtn = document.getElementById('persistent-close-logs-btn');
+        if (persistentCloseBtn) {
+            persistentCloseBtn.addEventListener('click', () => {
+                this.setVisibility(false);
+                this.saveSettings();
+            });
+        }
+    }
+    
+    loadSettings() {
+        try {
+            const saved = localStorage.getItem('emojiQuiz_logsSettings');
+            if (saved) {
+                const settings = JSON.parse(saved);
+                this.isVisible = settings.isVisible || false;
+                if (settings.enabledLevels) {
+                    this.enabledLevels = { ...this.enabledLevels, ...settings.enabledLevels };
+                }
+                this.setVisibility(this.isVisible);
+                this.updateLevelFilters();
+            }
+        } catch (e) {
+            console.log('Could not load logs settings:', e);
+        }
+    }
+    
+    saveSettings() {
+        try {
+            const settings = {
+                isVisible: this.isVisible,
+                enabledLevels: this.enabledLevels
+            };
+            localStorage.setItem('emojiQuiz_logsSettings', JSON.stringify(settings));
+        } catch (e) {
+            console.log('Could not save logs settings:', e);
+        }
+    }
+    
+    updateLevelFilters() {
+        const levelFilters = document.querySelectorAll('.level-filter-btn');
+        levelFilters.forEach(btn => {
+            const level = btn.dataset.level;
+            btn.classList.toggle('active', this.enabledLevels[level]);
+        });
+    }
+    
+    setVisibility(visible) {
+        this.isVisible = visible;
+        const persistentPanel = document.getElementById('persistent-logs-panel');
+        if (persistentPanel) {
+            persistentPanel.classList.toggle('visible', visible);
+            // Re-render all logs when panel becomes visible
+            if (visible) {
+                setTimeout(() => this.renderAllLogs(), 100);
+            }
+        }
+        this.saveSettings();
+    }
+    
+    toggleVisibility() {
+        this.setVisibility(!this.isVisible);
     }
     
     logBrowserInfo() {
@@ -122,13 +246,33 @@ class LoadingLogger {
         const consoleMethod = type === 'error' ? 'error' : type === 'warning' ? 'warn' : 'log';
         console[consoleMethod](`[${elapsed}s] ${message}`);
         
-        // Update UI if panel exists
-        this.renderLog(entry);
+        // Update UI if panel exists and level is enabled
+        if (this.enabledLevels[type]) {
+            this.renderLog(entry);
+        }
     }
     
     renderLog(entry) {
-        if (!this.logsContent) return;
+        // Render in loading overlay panel
+        if (this.logsContent) {
+            if (this.enabledLevels[entry.type]) {
+                const logEl = this.createLogElement(entry);
+                this.logsContent.appendChild(logEl);
+                this.logsContent.scrollTop = this.logsContent.scrollHeight;
+            }
+        }
         
+        // Render in persistent panel
+        if (this.persistentLogsContent && this.isVisible) {
+            if (this.enabledLevels[entry.type]) {
+                const logEl = this.createLogElement(entry);
+                this.persistentLogsContent.appendChild(logEl);
+                this.persistentLogsContent.scrollTop = this.persistentLogsContent.scrollHeight;
+            }
+        }
+    }
+    
+    createLogElement(entry) {
         const icons = {
             info: 'ℹ️',
             success: '✅',
@@ -143,9 +287,30 @@ class LoadingLogger {
             <span class="log-icon">${icons[entry.type] || 'ℹ️'}</span>
             <span class="log-message">${entry.message}</span>
         `;
+        return logEl;
+    }
+    
+    renderAllLogs() {
+        // Re-render all logs based on current filters
+        if (this.logsContent) {
+            this.logsContent.innerHTML = '';
+            this.logs.forEach(entry => {
+                if (this.enabledLevels[entry.type]) {
+                    this.logsContent.appendChild(this.createLogElement(entry));
+                }
+            });
+            this.logsContent.scrollTop = this.logsContent.scrollHeight;
+        }
         
-        this.logsContent.appendChild(logEl);
-        this.logsContent.scrollTop = this.logsContent.scrollHeight;
+        if (this.persistentLogsContent && this.isVisible) {
+            this.persistentLogsContent.innerHTML = '';
+            this.logs.forEach(entry => {
+                if (this.enabledLevels[entry.type]) {
+                    this.persistentLogsContent.appendChild(this.createLogElement(entry));
+                }
+            });
+            this.persistentLogsContent.scrollTop = this.persistentLogsContent.scrollHeight;
+        }
     }
     
     toggleLogs() {
@@ -164,6 +329,9 @@ class LoadingLogger {
         this.startTime = Date.now();
         if (this.logsContent) {
             this.logsContent.innerHTML = '';
+        }
+        if (this.persistentLogsContent) {
+            this.persistentLogsContent.innerHTML = '';
         }
         this.logBrowserInfo();
     }
@@ -298,19 +466,25 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
     
     async start() {
         if (!this.isInitialized) {
-            console.error('Google Cloud STT not initialized');
+            const errorMsg = 'Google Cloud STT not initialized';
+            console.error(errorMsg);
+            loadingLogger.log('error', errorMsg);
             return;
         }
         
         if (this.isListening) {
-            console.log('Google Cloud STT already listening');
+            const msg = 'Google Cloud STT already listening';
+            console.log(msg);
+            loadingLogger.log('warning', msg);
             return;
         }
         
         try {
+            loadingLogger.log('info', 'Starting Google Cloud STT streaming recognition...');
             console.log('Starting Google Cloud STT streaming recognition...');
             
             // Get microphone access
+            loadingLogger.log('info', 'Requesting microphone access...');
             this.mediaStream = await navigator.mediaDevices.getUserMedia({
                 video: false,
                 audio: {
@@ -320,8 +494,10 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                     sampleRate: 16000
                 }
             });
+            loadingLogger.log('success', 'Microphone access granted');
             
             // Create audio context
+            loadingLogger.log('info', 'Creating audio context (16kHz)...');
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
                 sampleRate: 16000
             });
@@ -336,6 +512,7 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             this.configSent = false;
             
             // Start streaming RPC connection
+            loadingLogger.log('info', 'Starting streaming RPC connection...');
             await this.startStreamingRPC();
             
             this.processorNode.onaudioprocess = (event) => {
@@ -354,6 +531,7 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                     this.sendAudioChunk(int16Data);
                 } catch (error) {
                     console.error('Audio processing failed', error);
+                    loadingLogger.log('error', `Audio processing failed: ${error.message}`);
                 }
             };
             
@@ -362,11 +540,14 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
             this.processorNode.connect(this.audioContext.destination);
             
             this.isListening = true;
+            loadingLogger.log('success', 'Google Cloud STT streaming recognition started');
             if (this.onStart) this.onStart();
             console.log('Google Cloud STT streaming recognition started');
             
         } catch (error) {
-            console.error('Failed to start Google Cloud STT recognition:', error);
+            const errorMsg = `Failed to start Google Cloud STT recognition: ${error.message}`;
+            console.error(errorMsg, error);
+            loadingLogger.log('error', errorMsg);
             if (this.onError) this.onError(error);
         }
     }
@@ -507,18 +688,25 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                 if (result.alternatives && result.alternatives.length > 0) {
                     const alternative = result.alternatives[0];
                     if (alternative.transcript) {
-                    const transcript = alternative.transcript.trim();
-                    // Check if this is a final result
-                    const isFinal = result.isFinal === true || (result.stability !== undefined && result.stability > 0.9);
+                        const transcript = alternative.transcript.trim();
+                        // Check if this is a final result
+                        const isFinal = result.isFinal === true || (result.stability !== undefined && result.stability > 0.9);
                         
                         if (transcript && this.onResult) {
                             console.log(`Google Cloud STT ${isFinal ? 'final' : 'interim'} result:`, transcript);
-                            loadingLogger.log('info', `Received ${isFinal ? 'final' : 'interim'} transcript: ${transcript}`);
+                            loadingLogger.log('info', `Received ${isFinal ? 'final' : 'interim'} transcript: "${transcript}" (confidence: ${alternative.confidence || 'N/A'})`);
                             this.onResult(transcript, isFinal);
+                        } else if (!transcript) {
+                            loadingLogger.log('warning', 'Received empty transcript from Google STT');
                         }
+                    } else {
+                        loadingLogger.log('warning', 'Received result without transcript');
                     }
                 }
             }
+        } else {
+            // No results - this is normal for interim results
+            loadingLogger.log('info', 'Received response with no results (waiting for speech)');
         }
     }
     
@@ -562,8 +750,12 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
     }
     
     stop() {
-        if (!this.isListening) return;
+        if (!this.isListening) {
+            loadingLogger.log('info', 'Google Cloud STT already stopped');
+            return;
+        }
         
+        loadingLogger.log('info', 'Stopping Google Cloud STT recognition...');
         console.log('Stopping Google Cloud STT recognition...');
         this.isListening = false;
         
@@ -571,14 +763,20 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
         if (this.streamController) {
             try {
                 this.streamController.close();
-            } catch (e) {}
+                loadingLogger.log('info', 'Stream controller closed');
+            } catch (e) {
+                loadingLogger.log('warning', `Error closing stream controller: ${e.message}`);
+            }
             this.streamController = null;
         }
         
         if (this.reader) {
             try {
                 this.reader.cancel();
-            } catch (e) {}
+                loadingLogger.log('info', 'Stream reader cancelled');
+            } catch (e) {
+                loadingLogger.log('warning', `Error cancelling reader: ${e.message}`);
+            }
             this.reader = null;
         }
         
@@ -600,17 +798,22 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
         if (this.audioContext) {
             this.audioContext.close().catch(() => {});
             this.audioContext = null;
+            loadingLogger.log('info', 'Audio context closed');
         }
         
         // Stop media stream
         if (this.mediaStream) {
-            this.mediaStream.getTracks().forEach(track => track.stop());
+            this.mediaStream.getTracks().forEach(track => {
+                track.stop();
+                loadingLogger.log('info', `Stopped audio track: ${track.label || 'unknown'}`);
+            });
             this.mediaStream = null;
         }
         
         this.audioBuffer = [];
         this.configSent = false;
         
+        loadingLogger.log('success', 'Google Cloud STT recognition stopped');
         if (this.onEnd) this.onEnd();
         console.log('Google Cloud STT recognition stopped');
     }
@@ -1096,6 +1299,15 @@ function loadSettings() {
                 // Set API key in engine
                 speechEngine.setApiKey(settings.googleCloudApiKey);
             }
+            
+            // Load logs visibility setting
+            const logsToggle = document.getElementById('logs-visibility-toggle');
+            if (logsToggle) {
+                logsToggle.checked = settings.showLogs || false;
+                if (loadingLogger) {
+                    loadingLogger.setVisibility(settings.showLogs || false);
+                }
+            }
         }
     } catch (e) {
         console.log('Could not load settings:', e);
@@ -1105,17 +1317,24 @@ function loadSettings() {
 function saveSettingsToStorage() {
     try {
         const apiKeyInput = document.getElementById('google-cloud-api-key');
+        const logsToggle = document.getElementById('logs-visibility-toggle');
         const settings = {
             guessTime: parseInt(elements.guessTimeInput.value) || 3,
             voiceTime: parseInt(elements.voiceTimeInput.value) || 10,
             speechEngine: elements.speechEngineInput.value || 'googlecloud',
-            googleCloudApiKey: apiKeyInput ? apiKeyInput.value.trim() : ''
+            googleCloudApiKey: apiKeyInput ? apiKeyInput.value.trim() : '',
+            showLogs: logsToggle ? logsToggle.checked : false
         };
         localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
         
         // Update API key in engine
         if (settings.googleCloudApiKey) {
             speechEngine.setApiKey(settings.googleCloudApiKey);
+        }
+        
+        // Update logs visibility
+        if (loadingLogger && logsToggle) {
+            loadingLogger.setVisibility(settings.showLogs);
         }
     } catch (e) {
         console.log('Could not save settings:', e);
@@ -1282,6 +1501,7 @@ function handleSpeechResult(transcript, isFinal) {
     }
     
     console.log(`Speech result - Text: "${transcript}", Final: ${isFinal}`);
+    loadingLogger.log('info', `Speech recognition ${isFinal ? 'final' : 'interim'} result: "${transcript}"`);
     
     // Check for correct answer
     if (transcript && gameState.voicePhaseStartTime && !gameState.correctAnswerDetected) {
@@ -1289,7 +1509,9 @@ function handleSpeechResult(transcript, isFinal) {
         if (checkAnswerMatch(transcript, question)) {
             gameState.answerTime = Date.now() - gameState.voicePhaseStartTime;
             gameState.correctAnswerDetected = true;
-            console.log(`Correct answer detected at ${gameState.answerTime}ms`);
+            const msg = `Correct answer detected at ${gameState.answerTime}ms`;
+            console.log(msg);
+            loadingLogger.log('success', msg);
             gameState.hasReceivedFinalConfirmation = true;
         }
     }
@@ -1298,6 +1520,7 @@ function handleSpeechResult(transcript, isFinal) {
 // Handle speech recognition errors
 function handleSpeechError(error) {
     console.error('Speech recognition error:', error);
+    loadingLogger.log('error', `Speech recognition error: ${error.message || error}`);
     if (error.message === 'Microphone access denied') {
         alert('Microphone access denied. Please allow microphone access to play the game.');
     }
@@ -1575,9 +1798,13 @@ function startVoicePhase() {
     // Only start if not already active
     if (!speechEngine.isListening()) {
         speechEngine.start();
-        console.log('Started recognition in voice phase');
+        const msg = 'Started recognition in voice phase';
+        console.log(msg);
+        loadingLogger.log('info', msg);
     } else {
-        console.log('Recognition already running (pre-started for lower latency)');
+        const msg = 'Recognition already running (pre-started for lower latency)';
+        console.log(msg);
+        loadingLogger.log('info', msg);
     }
     
     gameState.timerInterval = setInterval(() => {
@@ -1972,6 +2199,16 @@ elements.saveSettings.addEventListener('click', () => {
     saveSettingsToStorage();
     closeSettingsModal();
 });
+
+// Logs visibility toggle
+const logsToggle = document.getElementById('logs-visibility-toggle');
+if (logsToggle) {
+    logsToggle.addEventListener('change', () => {
+        if (loadingLogger) {
+            loadingLogger.setVisibility(logsToggle.checked);
+        }
+    });
+}
 
 // Clear data
 elements.clearDataBtn.addEventListener('click', () => {
