@@ -75,7 +75,10 @@ class GameState {
         this.recognition = null;
         this.recognizedText = '';
         this.voicePhaseStartTime = null; // Track when voice phase started
-        this.answerTime = null; // Track when answer was recognized
+        this.answerTime = null; // Track when correct answer was first recognized
+        this.correctAnswerDetected = false; // Track if we already detected a correct answer
+        this.isEvaluating = false; // Prevent multiple evaluations
+        this.waitingForFinalResult = false; // Track if we're waiting for final speech result
     }
 
     reset() {
@@ -90,6 +93,9 @@ class GameState {
         this.recognizedText = '';
         this.voicePhaseStartTime = null;
         this.answerTime = null;
+        this.correctAnswerDetected = false;
+        this.isEvaluating = false;
+        this.waitingForFinalResult = false;
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
             this.timerInterval = null;
@@ -284,25 +290,38 @@ function initSpeechRecognition() {
     gameState.recognition.onresult = (event) => {
         let finalTranscript = '';
         let interimTranscript = '';
+        let hasFinalResult = false;
         
         for (let i = event.resultIndex; i < event.results.length; i++) {
             const transcript = event.results[i][0].transcript;
             if (event.results[i].isFinal) {
                 finalTranscript += transcript;
+                hasFinalResult = true;
             } else {
                 interimTranscript += transcript;
             }
         }
         
         const newText = finalTranscript || interimTranscript;
-        
-        // Track when the first valid answer was detected
-        if (newText && !gameState.recognizedText && gameState.voicePhaseStartTime) {
-            gameState.answerTime = Date.now() - gameState.voicePhaseStartTime;
-        }
-        
         gameState.recognizedText = newText;
         elements.recognizedText.textContent = `"${gameState.recognizedText}"`;
+        
+        // Check if the recognized text matches the correct answer
+        if (newText && gameState.voicePhaseStartTime && !gameState.correctAnswerDetected) {
+            const question = MOVIE_QUESTIONS[gameState.currentQuestionIndex];
+            if (checkAnswerMatch(newText, question)) {
+                // Record the time when correct answer was FIRST detected
+                gameState.answerTime = Date.now() - gameState.voicePhaseStartTime;
+                gameState.correctAnswerDetected = true;
+                console.log(`Correct answer detected at ${gameState.answerTime}ms`);
+            }
+        }
+        
+        // If we have a final result and we're waiting for it, evaluate now
+        if (hasFinalResult && gameState.waitingForFinalResult && !gameState.isEvaluating) {
+            gameState.waitingForFinalResult = false;
+            evaluateAnswer();
+        }
     };
     
     gameState.recognition.onerror = (event) => {
@@ -313,8 +332,9 @@ function initSpeechRecognition() {
     };
     
     gameState.recognition.onend = () => {
-        // Restart if still in voice phase
-        if (gameState.isGameActive && gameState.currentPhase === 'voice') {
+        // Restart if still in voice phase and not waiting/evaluating
+        if (gameState.isGameActive && gameState.currentPhase === 'voice' && 
+            !gameState.waitingForFinalResult && !gameState.isEvaluating) {
             try {
                 gameState.recognition.start();
             } catch (e) {
@@ -366,7 +386,13 @@ function showQuestion() {
     elements.recognizedText.textContent = '';
     elements.feedback.className = 'feedback';
     elements.feedback.textContent = '';
+    
+    // Reset state for this question
     gameState.recognizedText = '';
+    gameState.answerTime = null;
+    gameState.correctAnswerDetected = false;
+    gameState.isEvaluating = false;
+    gameState.waitingForFinalResult = false;
     
     // Start guess phase
     startGuessPhase();
@@ -410,6 +436,9 @@ function startVoicePhase() {
     gameState.currentPhase = 'voice';
     gameState.voicePhaseStartTime = Date.now();
     gameState.answerTime = null;
+    gameState.correctAnswerDetected = false;
+    gameState.isEvaluating = false;
+    gameState.waitingForFinalResult = false;
     let timeLeft = gameState.voiceTime;
     
     // Update UI for voice phase
@@ -444,12 +473,45 @@ function startVoicePhase() {
         
         if (timeLeft <= 0) {
             clearInterval(gameState.timerInterval);
-            evaluateAnswer();
+            handleTimerEnd();
         }
     }, 1000);
 }
 
+// Handle when voice timer ends - wait for speech recognition if needed
+function handleTimerEnd() {
+    // If we've already detected a correct answer or have recognized text,
+    // wait a short time for speech recognition to finalize
+    if (gameState.recognizedText && !gameState.isEvaluating) {
+        gameState.waitingForFinalResult = true;
+        elements.phaseText.textContent = 'Processing...';
+        
+        // Give speech recognition a brief window to finalize
+        setTimeout(() => {
+            if (!gameState.isEvaluating) {
+                gameState.waitingForFinalResult = false;
+                evaluateAnswer();
+            }
+        }, 1500); // Wait up to 1.5 seconds for final result
+    } else {
+        // No recognized text, evaluate immediately
+        evaluateAnswer();
+    }
+}
+
 function evaluateAnswer() {
+    // Prevent multiple evaluations
+    if (gameState.isEvaluating) {
+        return;
+    }
+    gameState.isEvaluating = true;
+    
+    // Clear any pending timer
+    if (gameState.timerInterval) {
+        clearInterval(gameState.timerInterval);
+        gameState.timerInterval = null;
+    }
+    
     // Stop speech recognition
     try {
         gameState.recognition.stop();
@@ -461,6 +523,10 @@ function evaluateAnswer() {
     const userAnswer = gameState.recognizedText.toLowerCase().trim();
     const maxTimeMs = gameState.voiceTime * 1000;
     
+    // Use the pre-captured answer time if we detected a correct answer earlier
+    // This ensures we score based on when they FIRST said the correct answer
+    const reactionTime = gameState.correctAnswerDetected ? gameState.answerTime : null;
+    
     let result = {
         emojis: question.emojis,
         correctAnswer: question.answer,
@@ -469,41 +535,25 @@ function evaluateAnswer() {
         basePoints: 0,
         timeBonus: 0,
         totalPoints: 0,
-        reactionTime: gameState.answerTime
+        reactionTime: reactionTime
     };
     
     if (userAnswer) {
-        // Check if answer matches any acceptable answer using multiple methods
-        const isCorrect = question.acceptableAnswers.some(acceptable => {
-            // Direct match or partial match
-            if (userAnswer.includes(acceptable) || acceptable.includes(userAnswer)) {
-                return true;
-            }
-            
-            // Levenshtein similarity (fuzzy text matching)
-            if (levenshteinSimilarity(userAnswer, acceptable) > 0.7) {
-                return true;
-            }
-            
-            // Phonetic matching (sounds similar)
-            if (soundsLike(userAnswer, acceptable)) {
-                return true;
-            }
-            
-            return false;
-        });
+        // Check if answer matches using our helper function
+        const isCorrect = checkAnswerMatch(userAnswer, question);
         
         if (isCorrect) {
             result.status = 'correct';
             result.basePoints = 10;
-            result.timeBonus = calculateTimeBonus(gameState.answerTime, maxTimeMs);
+            result.timeBonus = calculateTimeBonus(reactionTime, maxTimeMs);
             result.totalPoints = result.basePoints + result.timeBonus;
             
             gameState.score += result.totalPoints;
             gameState.correctCount++;
             
             // Trigger confetti celebration!
-            triggerConfetti();
+            console.log('Triggering confetti for correct answer!');
+            setTimeout(() => triggerConfetti(), 100);
             
             if (result.timeBonus > 0) {
                 showFeedback('correct', `✅ Correct! +${result.basePoints} pts (+${result.timeBonus} speed bonus!)`);
@@ -532,7 +582,7 @@ function evaluateAnswer() {
         } else {
             showQuestion();
         }
-    }, 2000);
+    }, 2500);
 }
 
 // Levenshtein distance for fuzzy matching
@@ -561,6 +611,31 @@ function levenshteinSimilarity(s1, s2) {
     }
     
     return (longer.length - costs[s2.length]) / longer.length;
+}
+
+// Check if user answer matches the question's acceptable answers
+function checkAnswerMatch(userAnswer, question) {
+    const answer = userAnswer.toLowerCase().trim();
+    if (!answer) return false;
+    
+    return question.acceptableAnswers.some(acceptable => {
+        // Direct match or partial match
+        if (answer.includes(acceptable) || acceptable.includes(answer)) {
+            return true;
+        }
+        
+        // Levenshtein similarity (fuzzy text matching)
+        if (levenshteinSimilarity(answer, acceptable) > 0.7) {
+            return true;
+        }
+        
+        // Phonetic matching (sounds similar)
+        if (soundsLike(answer, acceptable)) {
+            return true;
+        }
+        
+        return false;
+    });
 }
 
 function showFeedback(type, message) {
@@ -672,14 +747,20 @@ window.addEventListener('beforeunload', (e) => {
 class ConfettiSystem {
     constructor() {
         this.canvas = document.getElementById('confetti-canvas');
+        if (!this.canvas) {
+            console.error('Confetti canvas not found!');
+            return;
+        }
         this.ctx = this.canvas.getContext('2d');
         this.particles = [];
         this.isAnimating = false;
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
+        console.log('Confetti system initialized');
     }
 
     resizeCanvas() {
+        if (!this.canvas) return;
         this.canvas.width = window.innerWidth;
         this.canvas.height = window.innerHeight;
     }
@@ -701,6 +782,11 @@ class ConfettiSystem {
     }
 
     burst(count = 100) {
+        if (!this.canvas || !this.ctx) {
+            console.error('Cannot burst confetti - canvas not ready');
+            return;
+        }
+        console.log(`Bursting ${count} confetti particles`);
         for (let i = 0; i < count; i++) {
             setTimeout(() => {
                 this.particles.push(this.createParticle());
