@@ -1051,6 +1051,409 @@ class WebSpeechEngine extends SpeechEngineInterface {
 }
 
 // ============================================
+// ELEVENLABS SPEECH-TO-TEXT ENGINE (Streaming)
+// ============================================
+
+class ElevenLabsSpeechEngine extends SpeechEngineInterface {
+    constructor() {
+        super();
+        this.apiKey = null;
+        this.audioContext = null;
+        this.mediaStream = null;
+        this.sourceNode = null;
+        this.processorNode = null;
+        this.isInitialized = false;
+        this.isLoading = false;
+        this.ws = null;
+        this.audioBuffer = [];
+    }
+    
+    getName() { return 'ElevenLabs STT (Streaming)'; }
+    
+    setApiKey(apiKey) {
+        this.apiKey = apiKey;
+    }
+    
+    isAvailable() {
+        const hasApiKey = !!this.apiKey && this.apiKey.trim().length > 0;
+        loadingLogger.log('info', `ElevenLabs STT API key available: ${hasApiKey}`);
+        return hasApiKey;
+    }
+    
+    async initialize(onProgress) {
+        if (this.isInitialized) {
+            loadingLogger.log('info', 'ElevenLabs STT already initialized, skipping');
+            return true;
+        }
+        if (this.isLoading) {
+            loadingLogger.log('warning', 'ElevenLabs STT initialization already in progress');
+            return false;
+        }
+        
+        this.isLoading = true;
+        loadingLogger.log('info', '=== Starting ElevenLabs STT Streaming Initialization ===');
+        
+        try {
+            // Step 1: Check API key
+            loadingLogger.log('info', 'Step 1: Checking API key...');
+            if (!this.apiKey || this.apiKey.trim().length === 0) {
+                loadingLogger.log('error', 'ElevenLabs API key not configured');
+                throw new Error('API key required. Please configure it in settings.');
+            }
+            loadingLogger.log('success', 'API key found');
+            
+            if (onProgress) onProgress('Initializing streaming connection...', 50);
+            
+            // Step 2: Streaming ready
+            loadingLogger.log('info', 'Step 2: Streaming connection ready');
+            
+            if (onProgress) onProgress('Ready!', 100);
+            
+            this.isInitialized = true;
+            this.isLoading = false;
+            loadingLogger.log('success', '=== ElevenLabs STT Streaming Initialization Complete ===');
+            return true;
+            
+        } catch (error) {
+            loadingLogger.log('error', `ElevenLabs STT initialization failed: ${error.message}`);
+            this.isLoading = false;
+            if (this.onError) this.onError(error);
+            throw error;
+        }
+    }
+    
+    async start() {
+        if (!this.isInitialized) {
+            const errorMsg = 'ElevenLabs STT not initialized';
+            console.error(errorMsg);
+            loadingLogger.log('error', errorMsg);
+            return;
+        }
+        
+        if (this.isListening) {
+            const msg = 'ElevenLabs STT already listening';
+            console.log(msg);
+            loadingLogger.log('warning', msg);
+            return;
+        }
+        
+        try {
+            loadingLogger.log('info', 'Starting ElevenLabs STT streaming recognition...');
+            console.log('Starting ElevenLabs STT streaming recognition...');
+            
+            // Get microphone access
+            loadingLogger.log('info', 'Requesting microphone access...');
+            this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                video: false,
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    channelCount: 1,
+                    sampleRate: 16000
+                }
+            });
+            loadingLogger.log('success', 'Microphone access granted');
+            
+            // Create audio context
+            loadingLogger.log('info', 'Creating audio context (16kHz)...');
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                sampleRate: 16000
+            });
+            
+            // Create source node from microphone
+            this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
+            
+            // Create script processor for audio processing
+            this.processorNode = this.audioContext.createScriptProcessor(4096, 1, 1);
+            
+            this.audioBuffer = [];
+            
+            // Start WebSocket connection
+            loadingLogger.log('info', 'Starting WebSocket connection to ElevenLabs...');
+            await this.startWebSocket();
+            
+            this.processorNode.onaudioprocess = (event) => {
+                if (!this.isListening || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+                
+                try {
+                    const inputData = event.inputBuffer.getChannelData(0);
+                    // Convert Float32Array to Int16Array for ElevenLabs API
+                    const int16Data = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        const s = Math.max(-1, Math.min(1, inputData[i]));
+                        int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+                    
+                    // Send audio chunk via WebSocket
+                    this.sendAudioChunk(int16Data);
+                } catch (error) {
+                    console.error('Audio processing failed', error);
+                    loadingLogger.log('error', `Audio processing failed: ${error.message}`);
+                }
+            };
+            
+            // Connect nodes
+            this.sourceNode.connect(this.processorNode);
+            this.processorNode.connect(this.audioContext.destination);
+            
+            this.isListening = true;
+            loadingLogger.log('success', 'ElevenLabs STT streaming recognition started');
+            if (this.onStart) this.onStart();
+            console.log('ElevenLabs STT streaming recognition started');
+            
+        } catch (error) {
+            const errorMsg = `Failed to start ElevenLabs STT recognition: ${error.message}`;
+            console.error(errorMsg, error);
+            loadingLogger.log('error', errorMsg);
+            if (this.onError) this.onError(error);
+        }
+    }
+    
+    async startWebSocket() {
+        try {
+            // ElevenLabs Speech-to-Text Streaming WebSocket API
+            // Based on: https://elevenlabs.io/docs/developers/guides/cookbooks/speech-to-text/streaming
+            // API key is passed as query parameter or in the first message
+            const wsUrl = `wss://api.elevenlabs.io/v1/speech-to-text/stream?model_id=eleven_multilingual_v2&xi-api-key=${encodeURIComponent(this.apiKey)}`;
+            
+            loadingLogger.log('info', 'Connecting to ElevenLabs WebSocket...');
+            
+            // Wait for connection to open
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('WebSocket connection timeout'));
+                }, 10000);
+                
+                this.ws = new WebSocket(wsUrl);
+                
+                this.ws.onopen = () => {
+                    clearTimeout(timeout);
+                    loadingLogger.log('success', 'WebSocket connection opened');
+                    console.log('ElevenLabs WebSocket connected');
+                    
+                    // Send configuration message
+                    const config = {
+                        type: 'config',
+                        language: 'en',
+                        model: 'eleven_multilingual_v2'
+                    };
+                    
+                    this.ws.send(JSON.stringify(config));
+                    loadingLogger.log('info', 'Sent configuration to ElevenLabs');
+                    resolve();
+                };
+                
+                this.ws.onmessage = (event) => {
+                    try {
+                        if (typeof event.data === 'string') {
+                            const data = JSON.parse(event.data);
+                            this.handleWebSocketMessage(data);
+                        } else if (event.data instanceof Blob) {
+                            // Handle binary data if needed
+                            loadingLogger.log('info', 'Received binary data from ElevenLabs');
+                        } else {
+                            // Try ArrayBuffer
+                            loadingLogger.log('info', 'Received ArrayBuffer data from ElevenLabs');
+                        }
+                    } catch (error) {
+                        loadingLogger.log('warning', `Failed to parse WebSocket message: ${error.message}`);
+                        console.error('Failed to parse message:', error);
+                    }
+                };
+                
+                this.ws.onerror = (error) => {
+                    clearTimeout(timeout);
+                    console.error('WebSocket error:', error);
+                    loadingLogger.log('error', `WebSocket error: ${error.message || 'Unknown error'}`);
+                    reject(error);
+                };
+                
+                this.ws.onclose = (event) => {
+                    console.log('WebSocket closed:', event.code, event.reason);
+                    loadingLogger.log('info', `WebSocket closed: ${event.code} - ${event.reason || 'No reason'}`);
+                    this.ws = null;
+                    
+                    if (this.isListening && event.code !== 1000) {
+                        // Unexpected close, notify error
+                        if (this.onError) {
+                            this.onError(new Error('WebSocket connection closed unexpectedly'));
+                        }
+                    }
+                };
+            });
+            
+        } catch (error) {
+            console.error('Failed to start WebSocket:', error);
+            loadingLogger.log('error', `WebSocket failed: ${error.message}`);
+            if (this.onError) {
+                let userFriendlyError = error.message;
+                
+                if (error.message.includes('API key') || error.message.includes('403') || error.message.includes('401')) {
+                    userFriendlyError = 'Invalid API key. Please check your ElevenLabs API key in settings.';
+                } else if (error.message.includes('Failed to fetch') || error.message.includes('Network error')) {
+                    userFriendlyError = 'Network error: Could not connect to ElevenLabs. Please check your internet connection and API key.';
+                }
+                
+                this.onError(new Error(userFriendlyError));
+            }
+            throw error;
+        }
+    }
+    
+    handleWebSocketMessage(data) {
+        if (data.error) {
+            console.error('WebSocket error:', data.error);
+            loadingLogger.log('error', `WebSocket error: ${data.error.message || data.error || 'Unknown error'}`);
+            if (this.onError) {
+                this.onError(new Error(data.error.message || data.error || 'WebSocket error'));
+            }
+            return;
+        }
+        
+        // Handle different message types from ElevenLabs STT API
+        // The API may return different formats, so we check multiple possibilities
+        
+        let transcript = null;
+        let isFinal = false;
+        
+        // Check for transcript in various formats
+        if (data.transcript) {
+            transcript = data.transcript;
+            isFinal = data.is_final === true || data.final === true;
+        } else if (data.text) {
+            transcript = data.text;
+            isFinal = data.is_final === true || data.final === true;
+        } else if (data.message && typeof data.message === 'string') {
+            transcript = data.message;
+            isFinal = data.is_final === true || data.final === true;
+        } else if (data.type === 'transcript' && data.data) {
+            transcript = data.data;
+            isFinal = data.is_final === true || data.final === true;
+        }
+        
+        // Process transcript if found
+        if (transcript && typeof transcript === 'string' && transcript.trim()) {
+            const trimmedTranscript = transcript.trim();
+            if (this.onResult) {
+                console.log(`ElevenLabs STT ${isFinal ? 'final' : 'interim'} result:`, trimmedTranscript);
+                loadingLogger.log('info', `Received ${isFinal ? 'final' : 'interim'} transcript: "${trimmedTranscript}"`);
+                this.onResult(trimmedTranscript, isFinal);
+            }
+        } else if (data.type === 'config' || data.type === 'ready' || data.status === 'connected') {
+            // Configuration/connection confirmation messages
+            loadingLogger.log('info', 'ElevenLabs WebSocket connection confirmed');
+        } else {
+            // Log unknown message format for debugging
+            loadingLogger.log('info', 'Received WebSocket message:', JSON.stringify(data).substring(0, 200));
+        }
+    }
+    
+    sendAudioChunk(audioData) {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            return;
+        }
+        
+        try {
+            // Convert Int16Array to base64
+            // ElevenLabs STT API expects base64-encoded PCM audio
+            const base64Audio = this.int16ToBase64(audioData);
+            
+            // Send audio data message
+            // Format may vary, but typically JSON with base64 audio
+            const audioMessage = {
+                type: 'audio',
+                audio: base64Audio,
+                format: 'pcm',
+                sample_rate: 16000
+            };
+            
+            this.ws.send(JSON.stringify(audioMessage));
+        } catch (error) {
+            console.error('Failed to send audio chunk:', error);
+            loadingLogger.log('error', `Failed to send audio chunk: ${error.message}`);
+        }
+    }
+    
+    int16ToBase64(int16Array) {
+        // Convert Int16Array to ArrayBuffer, then to base64
+        const buffer = new ArrayBuffer(int16Array.length * 2);
+        const view = new DataView(buffer);
+        for (let i = 0; i < int16Array.length; i++) {
+            view.setInt16(i * 2, int16Array[i], true); // littleEndian
+        }
+        
+        // Convert to base64
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    }
+    
+    stop() {
+        if (!this.isListening) {
+            loadingLogger.log('info', 'ElevenLabs STT already stopped');
+            return;
+        }
+        
+        loadingLogger.log('info', 'Stopping ElevenLabs STT recognition...');
+        console.log('Stopping ElevenLabs STT recognition...');
+        this.isListening = false;
+        
+        // Close WebSocket
+        if (this.ws) {
+            try {
+                if (this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.close(1000, 'Normal closure');
+                }
+                loadingLogger.log('info', 'WebSocket closed');
+            } catch (e) {
+                loadingLogger.log('warning', `Error closing WebSocket: ${e.message}`);
+            }
+            this.ws = null;
+        }
+        
+        // Disconnect and clean up audio nodes
+        if (this.processorNode) {
+            this.processorNode.disconnect();
+            this.processorNode = null;
+        }
+        
+        if (this.sourceNode) {
+            this.sourceNode.disconnect();
+            this.sourceNode = null;
+        }
+        
+        if (this.audioContext) {
+            this.audioContext.close().catch(() => {});
+            this.audioContext = null;
+            loadingLogger.log('info', 'Audio context closed');
+        }
+        
+        // Stop media stream
+        if (this.mediaStream) {
+            this.mediaStream.getTracks().forEach(track => {
+                track.stop();
+                loadingLogger.log('info', `Stopped audio track: ${track.label || 'unknown'}`);
+            });
+            this.mediaStream = null;
+        }
+        
+        this.audioBuffer = [];
+        
+        loadingLogger.log('success', 'ElevenLabs STT recognition stopped');
+        if (this.onEnd) this.onEnd();
+        console.log('ElevenLabs STT recognition stopped');
+    }
+    
+    destroy() {
+        this.stop();
+        this.isInitialized = false;
+    }
+}
+
+// ============================================
 // SPEECH ENGINE MANAGER
 // ============================================
 
@@ -1058,7 +1461,8 @@ class SpeechEngineManager {
     constructor() {
         this.engines = {
             googlecloud: new GoogleCloudSpeechEngine(),
-            webspeech: new WebSpeechEngine()
+            webspeech: new WebSpeechEngine(),
+            elevenlabs: new ElevenLabsSpeechEngine()
         };
         this.currentEngine = null;
         this.currentEngineName = 'googlecloud';  // Default to Google Cloud STT
@@ -1066,9 +1470,11 @@ class SpeechEngineManager {
         this.onError = null;
     }
     
-    setApiKey(apiKey) {
-        if (this.engines.googlecloud) {
+    setApiKey(apiKey, engineName = 'googlecloud') {
+        if (engineName === 'googlecloud' && this.engines.googlecloud) {
             this.engines.googlecloud.setApiKey(apiKey);
+        } else if (engineName === 'elevenlabs' && this.engines.elevenlabs) {
+            this.engines.elevenlabs.setApiKey(apiKey);
         }
     }
     
@@ -1385,14 +1791,23 @@ function loadSettings() {
             elements.speechEngineInput.value = engine;
             updateEngineButtonsUI(engine);
             
-            // Load API key if available
+            // Load API keys if available
             if (settings.googleCloudApiKey) {
                 const apiKeyInput = document.getElementById('google-cloud-api-key');
                 if (apiKeyInput) {
                     apiKeyInput.value = settings.googleCloudApiKey;
                 }
                 // Set API key in engine
-                speechEngine.setApiKey(settings.googleCloudApiKey);
+                speechEngine.setApiKey(settings.googleCloudApiKey, 'googlecloud');
+            }
+            
+            if (settings.elevenlabsApiKey) {
+                const apiKeyInput = document.getElementById('elevenlabs-api-key');
+                if (apiKeyInput) {
+                    apiKeyInput.value = settings.elevenlabsApiKey;
+                }
+                // Set API key in engine
+                speechEngine.setApiKey(settings.elevenlabsApiKey, 'elevenlabs');
             }
             
             // Load logs visibility setting
@@ -1411,20 +1826,25 @@ function loadSettings() {
 
 function saveSettingsToStorage() {
     try {
-        const apiKeyInput = document.getElementById('google-cloud-api-key');
+        const googleApiKeyInput = document.getElementById('google-cloud-api-key');
+        const elevenlabsApiKeyInput = document.getElementById('elevenlabs-api-key');
         const logsToggle = document.getElementById('logs-visibility-toggle');
         const settings = {
             guessTime: parseInt(elements.guessTimeInput.value) || 3,
             voiceTime: parseInt(elements.voiceTimeInput.value) || 10,
             speechEngine: elements.speechEngineInput.value || 'googlecloud',
-            googleCloudApiKey: apiKeyInput ? apiKeyInput.value.trim() : '',
+            googleCloudApiKey: googleApiKeyInput ? googleApiKeyInput.value.trim() : '',
+            elevenlabsApiKey: elevenlabsApiKeyInput ? elevenlabsApiKeyInput.value.trim() : '',
             showLogs: logsToggle ? logsToggle.checked : false
         };
         localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
         
-        // Update API key in engine
+        // Update API keys in engines
         if (settings.googleCloudApiKey) {
-            speechEngine.setApiKey(settings.googleCloudApiKey);
+            speechEngine.setApiKey(settings.googleCloudApiKey, 'googlecloud');
+        }
+        if (settings.elevenlabsApiKey) {
+            speechEngine.setApiKey(settings.elevenlabsApiKey, 'elevenlabs');
         }
         
         // Update logs visibility
@@ -1537,6 +1957,46 @@ async function initializeSelectedEngine() {
                 throw googleError;
             }
             
+        } else if (selectedEngine === 'elevenlabs') {
+            // ElevenLabs Speech-to-Text
+            loadingLogger.log('info', 'Checking ElevenLabs STT configuration...');
+            const apiKeyInput = document.getElementById('elevenlabs-api-key');
+            const apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
+            
+            if (!apiKey) {
+                loadingLogger.log('error', 'ElevenLabs API key not configured');
+                updateEngineStatus('error', 'API key required in settings');
+                alert('Please configure your ElevenLabs API key in settings before starting the game.');
+                return false;
+            }
+            
+            // Set API key in engine
+            speechEngine.setApiKey(apiKey, 'elevenlabs');
+            
+            if (!speechEngine.engines.elevenlabs.isAvailable()) {
+                loadingLogger.log('error', 'ElevenLabs STT not available - API key missing');
+                updateEngineStatus('error', 'API key required');
+                return false;
+            }
+            
+            // Show loading overlay
+            loadingLogger.log('info', 'Starting ElevenLabs STT initialization...');
+            showLoadingOverlay(true, 'Initializing ElevenLabs STT...', 5);
+            updateEngineStatus('loading', 'Connecting to ElevenLabs...');
+            
+            try {
+                await speechEngine.setEngine('elevenlabs', (status, progress) => {
+                    showLoadingOverlay(true, status, progress);
+                    loadingLogger.log('info', `Progress: ${progress}% - ${status}`);
+                });
+                
+                showLoadingOverlay(false);
+                updateEngineStatus('ready', 'ElevenLabs STT ready');
+                loadingLogger.log('success', 'ElevenLabs STT engine ready');
+                
+            } catch (elevenlabsError) {
+                throw elevenlabsError;
+            }
         } else {
             // Web Speech API
             loadingLogger.log('info', 'Initializing Web Speech API...');
@@ -1657,9 +2117,13 @@ function clearAllData() {
         elements.voiceTimeInput.value = 10;
         elements.speechEngineInput.value = 'googlecloud';
         updateEngineButtonsUI('googlecloud');
-        const apiKeyInput = document.getElementById('google-cloud-api-key');
-        if (apiKeyInput) {
-            apiKeyInput.value = '';
+        const googleApiKeyInput = document.getElementById('google-cloud-api-key');
+        if (googleApiKeyInput) {
+            googleApiKeyInput.value = '';
+        }
+        const elevenlabsApiKeyInput = document.getElementById('elevenlabs-api-key');
+        if (elevenlabsApiKeyInput) {
+            elevenlabsApiKeyInput.value = '';
         }
         alert('All scores and settings have been cleared!');
     } catch (e) {
@@ -2283,6 +2747,18 @@ elements.engineBtns.forEach(btn => {
             } else {
                 updateEngineStatus('error', 'API key required in settings');
             }
+        } else if (engine === 'elevenlabs') {
+            const apiKeyInput = document.getElementById('elevenlabs-api-key');
+            const hasApiKey = apiKeyInput && apiKeyInput.value.trim().length > 0;
+            if (hasApiKey) {
+                if (speechEngine.engines.elevenlabs.isInitialized) {
+                    updateEngineStatus('ready', 'ElevenLabs STT ready');
+                } else {
+                    updateEngineStatus('', 'ElevenLabs STT will initialize when you start');
+                }
+            } else {
+                updateEngineStatus('error', 'API key required in settings');
+            }
         } else {
             updateEngineStatus('ready', 'Web Speech ready (online)');
         }
@@ -2474,6 +2950,8 @@ function checkEnginesOnLoad() {
     loadingLogger.log('info', `Web Speech API available: ${hasWebSpeech}`);
     
     const selectedEngine = elements.speechEngineInput.value || 'googlecloud';
+    const elevenlabsApiKeyInput = document.getElementById('elevenlabs-api-key');
+    const hasElevenLabsApiKey = elevenlabsApiKeyInput && elevenlabsApiKeyInput.value.trim().length > 0;
     
     if (selectedEngine === 'googlecloud') {
         if (hasGoogleCloudApiKey) {
@@ -2482,6 +2960,14 @@ function checkEnginesOnLoad() {
         } else {
             updateEngineStatus('error', 'API key required in settings');
             loadingLogger.log('warning', 'Google Cloud API key not configured');
+        }
+    } else if (selectedEngine === 'elevenlabs') {
+        if (hasElevenLabsApiKey) {
+            updateEngineStatus('', 'ElevenLabs STT will initialize when you start');
+            loadingLogger.log('info', 'ElevenLabs STT selected - will initialize on game start');
+        } else {
+            updateEngineStatus('error', 'API key required in settings');
+            loadingLogger.log('warning', 'ElevenLabs API key not configured');
         }
     } else {
         if (hasWebSpeech) {

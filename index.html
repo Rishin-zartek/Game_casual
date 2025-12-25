@@ -121,6 +121,11 @@
                             <span class="engine-name">Web Speech</span>
                             <span class="engine-desc">Browser • Free</span>
                         </button>
+                        <button class="engine-btn" data-engine="elevenlabs">
+                            <span class="engine-icon">🎙️</span>
+                            <span class="engine-name">ElevenLabs</span>
+                            <span class="engine-desc">Streaming • High Quality</span>
+                        </button>
                     </div>
                     <input type="hidden" id="speech-engine" value="googlecloud">
                     <div id="engine-status" class="engine-status">
@@ -140,6 +145,21 @@
                         >
                         <p class="hint-text" style="margin-top: 6px; text-align: left;">
                             Get your API key from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color: var(--primary-light);">Google Cloud Console</a>
+                        </p>
+                    </div>
+                    
+                    <div class="setting-item full-width" style="margin-top: 12px;">
+                        <div class="setting-label">
+                            <span class="setting-emoji">🔑</span>
+                            <span>ElevenLabs API Key</span>
+                        </div>
+                        <input 
+                            type="password" 
+                            id="elevenlabs-api-key" 
+                            placeholder="Paste your API key here"
+                        >
+                        <p class="hint-text" style="margin-top: 6px; text-align: left;">
+                            Get your API key from <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" style="color: var(--primary-light);">ElevenLabs Settings</a>
                         </p>
                     </div>
                 </div>
