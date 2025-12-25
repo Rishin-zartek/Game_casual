@@ -65,6 +65,133 @@ const STORAGE_KEYS = {
 };
 
 // ============================================
+// LOGGING SYSTEM
+// ============================================
+
+class LoadingLogger {
+    constructor() {
+        this.logs = [];
+        this.startTime = Date.now();
+        this.logsPanel = null;
+        this.logsContent = null;
+        this.showLogsBtn = null;
+        this.isExpanded = false;
+    }
+    
+    init() {
+        this.logsPanel = document.getElementById('logs-panel');
+        this.logsContent = document.getElementById('logs-content');
+        this.showLogsBtn = document.getElementById('show-logs-btn');
+        const clearLogsBtn = document.getElementById('clear-logs-btn');
+        
+        if (this.showLogsBtn) {
+            this.showLogsBtn.addEventListener('click', () => this.toggleLogs());
+        }
+        
+        if (clearLogsBtn) {
+            clearLogsBtn.addEventListener('click', () => this.clearLogs());
+        }
+        
+        // Log initial browser info
+        this.logBrowserInfo();
+    }
+    
+    logBrowserInfo() {
+        const ua = navigator.userAgent;
+        const isAndroid = /Android/i.test(ua);
+        const isChrome = /Chrome/i.test(ua);
+        const isMobile = /Mobile/i.test(ua);
+        const isIOS = /iPhone|iPad|iPod/i.test(ua);
+        
+        this.log('info', `Browser: ${navigator.userAgent.substring(0, 80)}...`);
+        this.log('info', `Platform: ${isAndroid ? 'Android' : isIOS ? 'iOS' : 'Desktop'} | ${isChrome ? 'Chrome' : 'Other'} | ${isMobile ? 'Mobile' : 'Desktop'}`);
+        this.log('info', `Screen: ${window.innerWidth}x${window.innerHeight}`);
+    }
+    
+    log(type, message) {
+        const elapsed = ((Date.now() - this.startTime) / 1000).toFixed(2);
+        const entry = {
+            time: elapsed,
+            type: type, // 'info', 'success', 'warning', 'error'
+            message: message
+        };
+        
+        this.logs.push(entry);
+        
+        // Also log to console
+        const consoleMethod = type === 'error' ? 'error' : type === 'warning' ? 'warn' : 'log';
+        console[consoleMethod](`[${elapsed}s] ${message}`);
+        
+        // Update UI if panel exists
+        this.renderLog(entry);
+    }
+    
+    renderLog(entry) {
+        if (!this.logsContent) return;
+        
+        const icons = {
+            info: 'ℹ️',
+            success: '✅',
+            warning: '⚠️',
+            error: '❌'
+        };
+        
+        const logEl = document.createElement('div');
+        logEl.className = `log-entry ${entry.type}`;
+        logEl.innerHTML = `
+            <span class="log-time">${entry.time}s</span>
+            <span class="log-icon">${icons[entry.type] || 'ℹ️'}</span>
+            <span class="log-message">${entry.message}</span>
+        `;
+        
+        this.logsContent.appendChild(logEl);
+        this.logsContent.scrollTop = this.logsContent.scrollHeight;
+    }
+    
+    toggleLogs() {
+        this.isExpanded = !this.isExpanded;
+        
+        if (this.logsPanel) {
+            this.logsPanel.classList.toggle('active', this.isExpanded);
+        }
+        if (this.showLogsBtn) {
+            this.showLogsBtn.classList.toggle('active', this.isExpanded);
+        }
+    }
+    
+    clearLogs() {
+        this.logs = [];
+        this.startTime = Date.now();
+        if (this.logsContent) {
+            this.logsContent.innerHTML = '';
+        }
+        this.logBrowserInfo();
+    }
+    
+    getAllLogs() {
+        return this.logs.map(l => `[${l.time}s] [${l.type.toUpperCase()}] ${l.message}`).join('\n');
+    }
+}
+
+// Global logger instance
+const loadingLogger = new LoadingLogger();
+
+// Detect browser capabilities
+function detectBrowserCapabilities() {
+    const ua = navigator.userAgent;
+    return {
+        isAndroid: /Android/i.test(ua),
+        isChrome: /Chrome/i.test(ua) && !/Edg/i.test(ua),
+        isMobile: /Mobile|Android|iPhone|iPad/i.test(ua),
+        isIOS: /iPhone|iPad|iPod/i.test(ua),
+        isSafari: /Safari/i.test(ua) && !/Chrome/i.test(ua),
+        hasWebSpeech: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
+        hasAudioWorklet: !!(window.AudioWorkletNode),
+        hasWebAssembly: typeof WebAssembly !== 'undefined'
+    };
+}
+
+// ============================================
 // SPEECH ENGINE ABSTRACTION LAYER
 // ============================================
 
@@ -110,36 +237,81 @@ class VoskSpeechEngine extends SpeechEngineInterface {
     getName() { return 'Vosk (Offline)'; }
     
     isAvailable() {
-        return typeof Vosk !== 'undefined';
+        const available = typeof Vosk !== 'undefined';
+        loadingLogger.log('info', `Vosk library available: ${available}`);
+        return available;
     }
     
     async initialize(onProgress) {
-        if (this.isInitialized) return true;
-        if (this.isLoading) return false;
+        if (this.isInitialized) {
+            loadingLogger.log('info', 'Vosk already initialized, skipping');
+            return true;
+        }
+        if (this.isLoading) {
+            loadingLogger.log('warning', 'Vosk initialization already in progress');
+            return false;
+        }
         
         this.isLoading = true;
+        loadingLogger.log('info', '=== Starting Vosk Initialization ===');
+        
+        const browser = detectBrowserCapabilities();
+        loadingLogger.log('info', `WebAssembly support: ${browser.hasWebAssembly}`);
+        loadingLogger.log('info', `AudioWorklet support: ${browser.hasAudioWorklet}`);
         
         try {
-            console.log('Initializing Vosk speech engine...');
-            
+            // Step 1: Check Vosk library
+            loadingLogger.log('info', 'Step 1: Checking Vosk library...');
             if (typeof Vosk === 'undefined') {
+                loadingLogger.log('error', 'Vosk library not loaded from CDN');
                 throw new Error('Vosk library not loaded');
             }
+            loadingLogger.log('success', 'Vosk library found');
             
             // Report progress
             if (onProgress) onProgress('Loading Vosk model...', 10);
             
-            // Create model - Vosk will handle downloading/caching
-            console.log('Creating Vosk model from:', this.modelUrl);
+            // Step 2: Check browser compatibility
+            loadingLogger.log('info', 'Step 2: Checking browser compatibility...');
+            if (!browser.hasWebAssembly) {
+                loadingLogger.log('error', 'WebAssembly not supported - Vosk requires WASM');
+                throw new Error('WebAssembly not supported in this browser');
+            }
+            loadingLogger.log('success', 'Browser compatibility OK');
             
-            this.model = await Vosk.createModel(this.modelUrl);
+            if (onProgress) onProgress('Downloading model (~50MB)...', 15);
+            
+            // Step 3: Download and create model
+            loadingLogger.log('info', 'Step 3: Creating Vosk model...');
+            loadingLogger.log('info', `Model URL: ${this.modelUrl}`);
+            loadingLogger.log('info', 'This may take a while on mobile (~50MB download)...');
+            
+            const modelStartTime = Date.now();
+            
+            try {
+                this.model = await Vosk.createModel(this.modelUrl);
+                const modelTime = ((Date.now() - modelStartTime) / 1000).toFixed(1);
+                loadingLogger.log('success', `Model loaded in ${modelTime}s`);
+            } catch (modelError) {
+                loadingLogger.log('error', `Model loading failed: ${modelError.message}`);
+                loadingLogger.log('error', 'This may be due to: network issues, CORS, or memory limits');
+                throw modelError;
+            }
             
             if (onProgress) onProgress('Model loaded, setting up recognizer...', 80);
             
-            // Create recognizer (sample rate will be set when we start audio)
-            this.recognizer = new this.model.KaldiRecognizer(16000);
+            // Step 4: Create recognizer
+            loadingLogger.log('info', 'Step 4: Creating Kaldi recognizer...');
+            try {
+                this.recognizer = new this.model.KaldiRecognizer(16000);
+                loadingLogger.log('success', 'Recognizer created (16kHz sample rate)');
+            } catch (recError) {
+                loadingLogger.log('error', `Recognizer creation failed: ${recError.message}`);
+                throw recError;
+            }
             
-            // Set up result handler
+            // Step 5: Set up event handlers
+            loadingLogger.log('info', 'Step 5: Setting up event handlers...');
             this.recognizer.on('result', (message) => {
                 const result = message.result;
                 if (result && result.text && this.onResult) {
@@ -155,16 +327,18 @@ class VoskSpeechEngine extends SpeechEngineInterface {
                     this.onResult(partial.partial, false);
                 }
             });
+            loadingLogger.log('success', 'Event handlers configured');
             
             if (onProgress) onProgress('Ready!', 100);
             
             this.isInitialized = true;
             this.isLoading = false;
-            console.log('Vosk speech engine initialized successfully');
+            loadingLogger.log('success', '=== Vosk Initialization Complete ===');
             return true;
             
         } catch (error) {
-            console.error('Failed to initialize Vosk:', error);
+            loadingLogger.log('error', `Vosk initialization failed: ${error.message}`);
+            loadingLogger.log('warning', 'Will fall back to Web Speech API if available');
             this.isLoading = false;
             if (this.onError) this.onError(error);
             throw error;
@@ -298,22 +472,32 @@ class WebSpeechEngine extends SpeechEngineInterface {
     getName() { return 'Web Speech API (Online)'; }
     
     isAvailable() {
-        return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+        const available = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+        loadingLogger.log('info', `Web Speech API available: ${available}`);
+        return available;
     }
     
     async initialize() {
-        if (this.isInitialized) return true;
+        if (this.isInitialized) {
+            loadingLogger.log('info', 'Web Speech already initialized');
+            return true;
+        }
+        
+        loadingLogger.log('info', '=== Starting Web Speech API Initialization ===');
         
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         
         if (!SpeechRecognition) {
+            loadingLogger.log('error', 'Web Speech API constructor not found');
             throw new Error('Web Speech API not supported');
         }
         
+        loadingLogger.log('info', 'Creating SpeechRecognition instance...');
         this.recognition = new SpeechRecognition();
         this.recognition.continuous = true;
         this.recognition.interimResults = true;
         this.recognition.lang = 'en-US';
+        loadingLogger.log('success', 'SpeechRecognition configured (continuous, interim, en-US)');
         
         this.recognition.onresult = (event) => {
             let finalTranscript = '';
@@ -337,9 +521,15 @@ class WebSpeechEngine extends SpeechEngineInterface {
         };
         
         this.recognition.onerror = (event) => {
+            loadingLogger.log('error', `Web Speech error: ${event.error}`);
             console.log('Web Speech error:', event.error);
             if (event.error === 'not-allowed' && this.onError) {
+                loadingLogger.log('error', 'Microphone access was denied');
                 this.onError(new Error('Microphone access denied'));
+            } else if (event.error === 'network') {
+                loadingLogger.log('error', 'Network error - requires internet connection');
+            } else if (event.error === 'no-speech') {
+                loadingLogger.log('warning', 'No speech detected');
             }
         };
         
@@ -365,7 +555,7 @@ class WebSpeechEngine extends SpeechEngineInterface {
         
         this._shouldRestart = false;
         this.isInitialized = true;
-        console.log('Web Speech engine initialized');
+        loadingLogger.log('success', '=== Web Speech API Initialization Complete ===');
         return true;
     }
     
@@ -780,45 +970,91 @@ function showLoadingOverlay(show, status = '', progress = 0) {
         elements.loadingOverlay.classList.add('active');
         if (status) {
             elements.loadingStatus.textContent = status;
+            // Also log to our logging system
+            if (loadingLogger && loadingLogger.log) {
+                loadingLogger.log('info', status);
+            }
         }
         elements.loadingProgressBar.style.width = progress + '%';
     } else {
         elements.loadingOverlay.classList.remove('active');
+        // Reset the logs panel state when overlay closes
+        const logsPanel = document.getElementById('logs-panel');
+        const showLogsBtn = document.getElementById('show-logs-btn');
+        if (logsPanel) logsPanel.classList.remove('active');
+        if (showLogsBtn) showLogsBtn.classList.remove('active');
     }
 }
 
 // Initialize the selected speech engine
 async function initializeSelectedEngine() {
     const selectedEngine = elements.speechEngineInput.value || 'vosk';
+    const browser = detectBrowserCapabilities();
     
-    console.log('Initializing speech engine:', selectedEngine);
+    loadingLogger.log('info', '=== Initializing Speech Engine ===');
+    loadingLogger.log('info', `Selected engine: ${selectedEngine}`);
+    loadingLogger.log('info', `Android: ${browser.isAndroid}, Chrome: ${browser.isChrome}, Mobile: ${browser.isMobile}`);
+    
+    // Android Chrome recommendation: Web Speech API works better
+    if (browser.isAndroid && browser.isChrome && selectedEngine === 'vosk') {
+        loadingLogger.log('warning', 'Android Chrome detected - Vosk may have issues');
+        loadingLogger.log('info', 'Web Speech API is recommended for Android Chrome');
+    }
     
     try {
         if (selectedEngine === 'vosk') {
             // Check if Vosk is available
+            loadingLogger.log('info', 'Checking Vosk availability...');
             if (typeof Vosk === 'undefined') {
-                console.warn('Vosk not available, falling back to Web Speech');
+                loadingLogger.log('warning', 'Vosk library not loaded from CDN');
+                loadingLogger.log('info', 'Falling back to Web Speech API');
                 elements.speechEngineInput.value = 'webspeech';
                 updateEngineButtonsUI('webspeech');
                 updateEngineStatus('error', 'Vosk not available, using Web Speech');
                 await speechEngine.setEngine('webspeech');
+                loadingLogger.log('success', 'Web Speech API initialized as fallback');
+                speechEngine.onResult = handleSpeechResult;
+                speechEngine.onError = handleSpeechError;
                 return true;
             }
             
             // Show loading overlay for Vosk
+            loadingLogger.log('info', 'Starting Vosk initialization...');
             showLoadingOverlay(true, 'Initializing Vosk...', 5);
             updateEngineStatus('loading', 'Loading Vosk model...');
             
-            await speechEngine.setEngine('vosk', (status, progress) => {
-                showLoadingOverlay(true, status, progress);
-            });
+            // Add timeout warning for mobile
+            let timeoutWarningShown = false;
+            const timeoutWarning = setTimeout(() => {
+                if (!timeoutWarningShown) {
+                    timeoutWarningShown = true;
+                    loadingLogger.log('warning', 'Loading taking longer than expected...');
+                    loadingLogger.log('info', 'On mobile, this can take 1-2 minutes');
+                    loadingLogger.log('info', 'If stuck, try Web Speech API instead');
+                }
+            }, 15000);
             
-            showLoadingOverlay(false);
-            updateEngineStatus('ready', 'Vosk ready (offline)');
+            try {
+                await speechEngine.setEngine('vosk', (status, progress) => {
+                    showLoadingOverlay(true, status, progress);
+                    loadingLogger.log('info', `Progress: ${progress}% - ${status}`);
+                });
+                
+                clearTimeout(timeoutWarning);
+                showLoadingOverlay(false);
+                updateEngineStatus('ready', 'Vosk ready (offline)');
+                loadingLogger.log('success', 'Vosk engine ready');
+                
+            } catch (voskError) {
+                clearTimeout(timeoutWarning);
+                throw voskError;
+            }
             
         } else {
             // Web Speech API
+            loadingLogger.log('info', 'Initializing Web Speech API...');
             if (!speechEngine.engines.webspeech.isAvailable()) {
+                loadingLogger.log('error', 'Web Speech API not supported in this browser');
                 updateEngineStatus('error', 'Web Speech not supported');
                 showBrowserWarning();
                 return false;
@@ -826,22 +1062,24 @@ async function initializeSelectedEngine() {
             
             await speechEngine.setEngine('webspeech');
             updateEngineStatus('ready', 'Web Speech ready (online)');
+            loadingLogger.log('success', 'Web Speech API ready');
         }
         
         // Set up callbacks
         speechEngine.onResult = handleSpeechResult;
         speechEngine.onError = handleSpeechError;
+        loadingLogger.log('success', 'Speech engine callbacks configured');
         
         return true;
         
     } catch (error) {
-        console.error('Failed to initialize speech engine:', error);
+        loadingLogger.log('error', `Engine initialization failed: ${error.message}`);
         showLoadingOverlay(false);
         updateEngineStatus('error', 'Failed to initialize: ' + error.message);
         
         // Try to fall back to Web Speech
         if (selectedEngine === 'vosk' && speechEngine.engines.webspeech.isAvailable()) {
-            console.log('Falling back to Web Speech API');
+            loadingLogger.log('info', 'Attempting fallback to Web Speech API...');
             elements.speechEngineInput.value = 'webspeech';
             updateEngineButtonsUI('webspeech');
             try {
@@ -849,9 +1087,10 @@ async function initializeSelectedEngine() {
                 speechEngine.onResult = handleSpeechResult;
                 speechEngine.onError = handleSpeechError;
                 updateEngineStatus('ready', 'Fell back to Web Speech (online)');
+                loadingLogger.log('success', 'Fallback to Web Speech successful');
                 return true;
             } catch (e) {
-                console.error('Fallback also failed:', e);
+                loadingLogger.log('error', `Fallback also failed: ${e.message}`);
             }
         }
         
@@ -1704,35 +1943,66 @@ function triggerConfetti() {
 // Load saved settings on page load
 loadSettings();
 
+// Initialize the loading logger
+loadingLogger.init();
+
 // Check available engines and update status on page load
 function checkEnginesOnLoad() {
     const hasVosk = typeof Vosk !== 'undefined';
     const hasWebSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    const browser = detectBrowserCapabilities();
     
-    console.log('Available engines - Vosk:', hasVosk, ', Web Speech:', hasWebSpeech);
+    loadingLogger.log('info', '=== Checking Available Engines ===');
+    loadingLogger.log('info', `Vosk library loaded: ${hasVosk}`);
+    loadingLogger.log('info', `Web Speech API available: ${hasWebSpeech}`);
     
     const selectedEngine = elements.speechEngineInput.value || 'vosk';
+    
+    // For Android Chrome, recommend Web Speech API
+    if (browser.isAndroid && browser.isChrome) {
+        loadingLogger.log('info', 'Android Chrome detected');
+        if (hasWebSpeech) {
+            loadingLogger.log('info', 'Recommendation: Use Web Speech API for better compatibility');
+            // Auto-switch to Web Speech for Android Chrome if Vosk is selected
+            if (selectedEngine === 'vosk' && hasWebSpeech) {
+                loadingLogger.log('info', 'Auto-selecting Web Speech for Android Chrome');
+                elements.speechEngineInput.value = 'webspeech';
+                updateEngineButtonsUI('webspeech');
+                updateEngineStatus('ready', 'Web Speech ready (recommended for Android)');
+                saveSettingsToStorage();
+                return;
+            }
+        }
+    }
     
     if (selectedEngine === 'vosk') {
         if (hasVosk) {
             updateEngineStatus('', 'Vosk will load when you start');
+            loadingLogger.log('info', 'Vosk selected - will load on game start');
         } else {
             // Fall back to Web Speech
+            loadingLogger.log('warning', 'Vosk library not available');
             elements.speechEngineInput.value = 'webspeech';
             updateEngineButtonsUI('webspeech');
             if (hasWebSpeech) {
                 updateEngineStatus('ready', 'Using Web Speech (Vosk unavailable)');
+                loadingLogger.log('info', 'Switched to Web Speech API');
             } else {
                 updateEngineStatus('error', 'No speech engine available');
+                loadingLogger.log('error', 'No speech recognition available!');
             }
         }
     } else {
         if (hasWebSpeech) {
             updateEngineStatus('ready', 'Web Speech ready (online)');
+            loadingLogger.log('success', 'Web Speech API ready');
         } else {
             updateEngineStatus('error', 'Web Speech not supported');
+            loadingLogger.log('error', 'Web Speech API not supported');
         }
     }
+    
+    loadingLogger.log('info', '=== Engine Check Complete ===');
 }
 
 // Run initial check after a short delay to ensure Vosk script has loaded
