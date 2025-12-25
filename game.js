@@ -71,11 +71,17 @@ const STORAGE_KEYS = {
 class LoadingLogger {
     constructor() {
         this.logs = [];
+        this.gameLogs = [];
         this.startTime = Date.now();
         this.logsPanel = null;
         this.logsContent = null;
         this.showLogsBtn = null;
         this.isExpanded = false;
+        this.gameLogsPanel = null;
+        this.gameLogsContent = null;
+        this.toggleGameLogsBtn = null;
+        this.showGameLogs = false;
+        this.currentLevel = 0;
     }
     
     init() {
@@ -83,6 +89,11 @@ class LoadingLogger {
         this.logsContent = document.getElementById('logs-content');
         this.showLogsBtn = document.getElementById('show-logs-btn');
         const clearLogsBtn = document.getElementById('clear-logs-btn');
+        
+        // Game logs elements
+        this.gameLogsPanel = document.getElementById('game-logs-panel');
+        this.gameLogsContent = document.getElementById('game-logs-content');
+        this.toggleGameLogsBtn = document.getElementById('toggle-game-logs-btn');
         
         if (this.showLogsBtn) {
             this.showLogsBtn.addEventListener('click', () => this.toggleLogs());
@@ -92,8 +103,114 @@ class LoadingLogger {
             clearLogsBtn.addEventListener('click', () => this.clearLogs());
         }
         
+        if (this.toggleGameLogsBtn) {
+            this.toggleGameLogsBtn.addEventListener('click', () => this.toggleGameLogsCollapse());
+        }
+        
         // Log initial browser info
         this.logBrowserInfo();
+    }
+    
+    setShowGameLogs(show) {
+        this.showGameLogs = show;
+        if (this.gameLogsPanel) {
+            // Only show if we're on the game screen
+            const isGameScreen = elements.gameScreen && elements.gameScreen.classList.contains('active');
+            if (show && isGameScreen) {
+                this.gameLogsPanel.classList.add('visible');
+            } else {
+                this.gameLogsPanel.classList.remove('visible');
+            }
+        }
+    }
+    
+    toggleGameLogsCollapse() {
+        if (this.gameLogsPanel) {
+            this.gameLogsPanel.classList.toggle('collapsed');
+            if (this.toggleGameLogsBtn) {
+                this.toggleGameLogsBtn.classList.toggle('collapsed');
+            }
+        }
+    }
+    
+    logLevel(level, question) {
+        const elapsed = ((Date.now() - this.startTime) / 1000).toFixed(2);
+        this.currentLevel = level;
+        
+        const entry = {
+            time: elapsed,
+            type: 'level-marker',
+            message: `Level ${level}: ${question.emojis} - "${question.answer}"`,
+            level: level
+        };
+        
+        this.gameLogs.push(entry);
+        
+        // Update level display
+        const levelDisplay = document.getElementById('logs-current-level');
+        if (levelDisplay) {
+            levelDisplay.textContent = level;
+        }
+        
+        // Render in game logs if enabled
+        if (this.showGameLogs && this.gameLogsContent) {
+            this.renderGameLog(entry);
+        }
+        
+        // Also log to console
+        console.log(`[Level ${level}] ${question.emojis} - "${question.answer}"`);
+    }
+    
+    logGame(type, message) {
+        const elapsed = ((Date.now() - this.startTime) / 1000).toFixed(2);
+        const entry = {
+            time: elapsed,
+            type: type,
+            message: message,
+            level: this.currentLevel
+        };
+        
+        this.gameLogs.push(entry);
+        
+        // Also log to console
+        const consoleMethod = type === 'error' ? 'error' : type === 'warning' ? 'warn' : 'log';
+        console[consoleMethod](`[Level ${this.currentLevel}] [${elapsed}s] ${message}`);
+        
+        // Render in game logs if enabled
+        if (this.showGameLogs && this.gameLogsContent) {
+            this.renderGameLog(entry);
+        }
+    }
+    
+    renderGameLog(entry) {
+        if (!this.gameLogsContent) return;
+        
+        const icons = {
+            info: 'ℹ️',
+            success: '✅',
+            warning: '⚠️',
+            error: '❌',
+            'level-marker': '🎬'
+        };
+        
+        const logEl = document.createElement('div');
+        logEl.className = `game-log-entry ${entry.type}`;
+        logEl.innerHTML = `
+            <span class="game-log-time">${entry.time}s</span>
+            <span class="game-log-icon">${icons[entry.type] || 'ℹ️'}</span>
+            <span class="game-log-message">${entry.message}</span>
+        `;
+        
+        this.gameLogsContent.appendChild(logEl);
+        this.gameLogsContent.scrollTop = this.gameLogsContent.scrollHeight;
+    }
+    
+    clearGameLogs() {
+        this.gameLogs = [];
+        this.currentLevel = 0;
+        if (this.gameLogsContent) {
+            this.gameLogsContent.innerHTML = '';
+        }
     }
     
     logBrowserInfo() {
@@ -117,6 +234,11 @@ class LoadingLogger {
         };
         
         this.logs.push(entry);
+        
+        // Also log to game logs if we're in a game
+        if (this.currentLevel > 0) {
+            this.logGame(type, message);
+        }
         
         // Also log to console
         const consoleMethod = type === 'error' ? 'error' : type === 'warning' ? 'warn' : 'log';
@@ -1096,6 +1218,13 @@ function loadSettings() {
                 // Set API key in engine
                 speechEngine.setApiKey(settings.googleCloudApiKey);
             }
+            
+            // Load show game logs setting
+            const showLogsToggle = document.getElementById('show-logs-toggle');
+            if (showLogsToggle) {
+                showLogsToggle.checked = settings.showGameLogs || false;
+                loadingLogger.setShowGameLogs(settings.showGameLogs || false);
+            }
         }
     } catch (e) {
         console.log('Could not load settings:', e);
@@ -1105,11 +1234,13 @@ function loadSettings() {
 function saveSettingsToStorage() {
     try {
         const apiKeyInput = document.getElementById('google-cloud-api-key');
+        const showLogsToggle = document.getElementById('show-logs-toggle');
         const settings = {
             guessTime: parseInt(elements.guessTimeInput.value) || 3,
             voiceTime: parseInt(elements.voiceTimeInput.value) || 10,
             speechEngine: elements.speechEngineInput.value || 'googlecloud',
-            googleCloudApiKey: apiKeyInput ? apiKeyInput.value.trim() : ''
+            googleCloudApiKey: apiKeyInput ? apiKeyInput.value.trim() : '',
+            showGameLogs: showLogsToggle ? showLogsToggle.checked : false
         };
         localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
         
@@ -1117,6 +1248,9 @@ function saveSettingsToStorage() {
         if (settings.googleCloudApiKey) {
             speechEngine.setApiKey(settings.googleCloudApiKey);
         }
+        
+        // Update game logs visibility
+        loadingLogger.setShowGameLogs(settings.showGameLogs);
     } catch (e) {
         console.log('Could not save settings:', e);
     }
@@ -1281,7 +1415,7 @@ function handleSpeechResult(transcript, isFinal) {
         elements.recognizedText.textContent = `"${gameState.recognizedText}"`;
     }
     
-    console.log(`Speech result - Text: "${transcript}", Final: ${isFinal}`);
+    loadingLogger.logGame('info', `Speech ${isFinal ? 'final' : 'interim'}: "${transcript}"`);
     
     // Check for correct answer
     if (transcript && gameState.voicePhaseStartTime && !gameState.correctAnswerDetected) {
@@ -1289,7 +1423,7 @@ function handleSpeechResult(transcript, isFinal) {
         if (checkAnswerMatch(transcript, question)) {
             gameState.answerTime = Date.now() - gameState.voicePhaseStartTime;
             gameState.correctAnswerDetected = true;
-            console.log(`Correct answer detected at ${gameState.answerTime}ms`);
+            loadingLogger.logGame('success', `✅ Correct answer detected! Time: ${(gameState.answerTime / 1000).toFixed(2)}s`);
             gameState.hasReceivedFinalConfirmation = true;
         }
     }
@@ -1343,6 +1477,12 @@ function clearAllData() {
         if (apiKeyInput) {
             apiKeyInput.value = '';
         }
+        const showLogsToggle = document.getElementById('show-logs-toggle');
+        if (showLogsToggle) {
+            showLogsToggle.checked = false;
+        }
+        loadingLogger.clearGameLogs();
+        loadingLogger.setShowGameLogs(false);
         alert('All scores and settings have been cleared!');
     } catch (e) {
         console.log('Could not clear data:', e);
@@ -1386,6 +1526,16 @@ function showScreen(screen) {
     elements.resultsScreen.classList.remove('active');
     elements.countdownScreen.classList.remove('active');
     screen.classList.add('active');
+    
+    // Show/hide game logs panel based on current screen and setting
+    const gameLogsPanel = document.getElementById('game-logs-panel');
+    if (gameLogsPanel) {
+        if (screen === elements.gameScreen && loadingLogger.showGameLogs) {
+            gameLogsPanel.classList.add('visible');
+        } else {
+            gameLogsPanel.classList.remove('visible');
+        }
+    }
 }
 
 // ============================================
@@ -1438,6 +1588,10 @@ async function startGame() {
     gameState.guessTime = parseInt(elements.guessTimeInput.value) || 3;
     gameState.voiceTime = parseInt(elements.voiceTimeInput.value) || 10;
     
+    // Clear game logs for new game
+    loadingLogger.clearGameLogs();
+    loadingLogger.logGame('info', '=== New Game Started ===');
+    
     elements.totalQuestions.textContent = MOVIE_QUESTIONS.length;
     elements.maxScore.textContent = MOVIE_QUESTIONS.length * 15;
     
@@ -1466,10 +1620,14 @@ function prewarmSpeechRecognition() {
 
 function showQuestion() {
     const question = MOVIE_QUESTIONS[gameState.currentQuestionIndex];
+    const level = gameState.currentQuestionIndex + 1;
+    
+    // Log level marker
+    loadingLogger.logLevel(level, question);
     
     // Reset UI
     elements.emojis.textContent = question.emojis;
-    elements.currentQuestion.textContent = gameState.currentQuestionIndex + 1;
+    elements.currentQuestion.textContent = level;
     elements.score.textContent = gameState.score;
     elements.recognizedText.textContent = '';
     elements.feedback.className = 'feedback';
@@ -1490,6 +1648,7 @@ function showQuestion() {
         gameState.processingCheckInterval = null;
     }
     
+    loadingLogger.logGame('info', 'Starting guess phase...');
     startGuessPhase();
 }
 
@@ -1563,6 +1722,8 @@ function startVoicePhase() {
     }
     let timeLeft = gameState.voiceTime;
     
+    loadingLogger.logGame('info', 'Starting voice phase - listening for answer...');
+    
     elements.phaseLabel.textContent = 'Speak';
     elements.phaseIcon.textContent = '🎤';
     elements.phaseIcon.className = 'phase-icon speaking';
@@ -1575,9 +1736,9 @@ function startVoicePhase() {
     // Only start if not already active
     if (!speechEngine.isListening()) {
         speechEngine.start();
-        console.log('Started recognition in voice phase');
+        loadingLogger.logGame('info', 'Speech recognition started');
     } else {
-        console.log('Recognition already running (pre-started for lower latency)');
+        loadingLogger.logGame('info', 'Speech recognition already running (pre-started)');
     }
     
     gameState.timerInterval = setInterval(() => {
@@ -1687,9 +1848,8 @@ function evaluateAnswer() {
     }
     gameState.isEvaluating = true;
     
-    console.log('=== EVALUATING ANSWER ===');
-    console.log('Recognized text:', gameState.recognizedText);
-    console.log('Correct answer detected:', gameState.correctAnswerDetected);
+    loadingLogger.logGame('info', `=== Evaluating Answer ===`);
+    loadingLogger.logGame('info', `Recognized: "${gameState.recognizedText}"`);
     
     if (gameState.timerInterval) {
         clearInterval(gameState.timerInterval);
@@ -1732,7 +1892,7 @@ function evaluateAnswer() {
             gameState.score += result.totalPoints;
             gameState.correctCount++;
             
-            console.log('Triggering confetti for correct answer!');
+            loadingLogger.logGame('success', `✅ CORRECT! Points: ${result.totalPoints} (base: ${result.basePoints}, bonus: ${result.timeBonus})`);
             setTimeout(() => triggerConfetti(), 100);
             
             if (result.timeBonus > 0) {
@@ -1743,10 +1903,12 @@ function evaluateAnswer() {
         } else {
             result.status = 'incorrect';
             gameState.incorrectCount++;
+            loadingLogger.logGame('warning', `❌ INCORRECT. Expected: "${question.answer}"`);
             showFeedback('incorrect', `❌ Incorrect! It was "${question.answer}"`);
         }
     } else {
         gameState.timeoutCount++;
+        loadingLogger.logGame('warning', `⏱️ TIMEOUT - No answer received`);
         showFeedback('timeout', `⏱️ Time's up! It was "${question.answer}"`);
     }
     
@@ -1757,6 +1919,7 @@ function evaluateAnswer() {
         gameState.currentQuestionIndex++;
         
         if (gameState.currentQuestionIndex >= MOVIE_QUESTIONS.length) {
+            loadingLogger.logGame('info', '=== Game Complete ===');
             endGame();
         } else {
             showQuestion();
@@ -1972,6 +2135,16 @@ elements.saveSettings.addEventListener('click', () => {
     saveSettingsToStorage();
     closeSettingsModal();
 });
+
+// Logs visibility toggle
+const showLogsToggle = document.getElementById('show-logs-toggle');
+if (showLogsToggle) {
+    showLogsToggle.addEventListener('change', (e) => {
+        loadingLogger.setShowGameLogs(e.target.checked);
+        // Save immediately when toggled
+        saveSettingsToStorage();
+    });
+}
 
 // Clear data
 elements.clearDataBtn.addEventListener('click', () => {

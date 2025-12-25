@@ -171,6 +171,21 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="settings-section">
+                    <h3>Debug & Logs</h3>
+                    <div class="setting-item">
+                        <div class="setting-label">
+                            <span class="setting-emoji">📋</span>
+                            <span>Show Logs During Game</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="show-logs-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <p class="hint-text">Enable to see detailed logs for each question/level</p>
+                </div>
                 
                 <div class="settings-section danger-zone">
                     <h3>Data Management</h3>
@@ -197,6 +212,15 @@
 
         <!-- Game Screen -->
         <div id="game-screen" class="screen">
+            <!-- Game Logs Panel (shown when enabled in settings) -->
+            <div id="game-logs-panel" class="game-logs-panel">
+                <div class="game-logs-header">
+                    <span>📋 Game Logs - Level <span id="logs-current-level">1</span></span>
+                    <button id="toggle-game-logs-btn" class="toggle-game-logs-btn" title="Toggle Logs">▼</button>
+                </div>
+                <div id="game-logs-content" class="game-logs-content"></div>
+            </div>
+
             <div class="game-header">
                 <div class="score-display">
                     <span class="score-label">Score</span>
