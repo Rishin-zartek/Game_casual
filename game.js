@@ -214,131 +214,82 @@ class SpeechEngineInterface {
 }
 
 // ============================================
-// VOSK SPEECH ENGINE (Offline)
+// GOOGLE CLOUD SPEECH-TO-TEXT ENGINE (Online)
 // ============================================
 
-class VoskSpeechEngine extends SpeechEngineInterface {
+class GoogleCloudSpeechEngine extends SpeechEngineInterface {
     constructor() {
         super();
-        this.model = null;
-        this.recognizer = null;
+        this.apiKey = null;
         this.audioContext = null;
         this.mediaStream = null;
         this.sourceNode = null;
         this.processorNode = null;
         this.isInitialized = false;
         this.isLoading = false;
-        
-        // Vosk model URL - small English model (~50MB)
-        // Using a smaller model for faster loading
-        this.modelUrl = 'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip';
+        this.streamingRequest = null;
+        this.reader = null;
+        this.audioBuffer = [];
+        this.configSent = false;
+        this.recognitionConfig = {
+            encoding: 'LINEAR16',
+            sampleRateHertz: 16000,
+            languageCode: 'en-US',
+            enableAutomaticPunctuation: false,
+            model: 'default',
+            useEnhanced: false,
+            enableInterimResults: true
+        };
     }
     
-    getName() { return 'Vosk (Offline)'; }
+    getName() { return 'Google Cloud STT (Streaming RPC)'; }
+    
+    setApiKey(apiKey) {
+        this.apiKey = apiKey;
+    }
     
     isAvailable() {
-        const available = typeof Vosk !== 'undefined';
-        loadingLogger.log('info', `Vosk library available: ${available}`);
-        return available;
+        const hasApiKey = !!this.apiKey && this.apiKey.trim().length > 0;
+        loadingLogger.log('info', `Google Cloud STT API key available: ${hasApiKey}`);
+        return hasApiKey;
     }
     
     async initialize(onProgress) {
         if (this.isInitialized) {
-            loadingLogger.log('info', 'Vosk already initialized, skipping');
+            loadingLogger.log('info', 'Google Cloud STT already initialized, skipping');
             return true;
         }
         if (this.isLoading) {
-            loadingLogger.log('warning', 'Vosk initialization already in progress');
+            loadingLogger.log('warning', 'Google Cloud STT initialization already in progress');
             return false;
         }
         
         this.isLoading = true;
-        loadingLogger.log('info', '=== Starting Vosk Initialization ===');
-        
-        const browser = detectBrowserCapabilities();
-        loadingLogger.log('info', `WebAssembly support: ${browser.hasWebAssembly}`);
-        loadingLogger.log('info', `AudioWorklet support: ${browser.hasAudioWorklet}`);
+        loadingLogger.log('info', '=== Starting Google Cloud STT Streaming RPC Initialization ===');
         
         try {
-            // Step 1: Check Vosk library
-            loadingLogger.log('info', 'Step 1: Checking Vosk library...');
-            if (typeof Vosk === 'undefined') {
-                loadingLogger.log('error', 'Vosk library not loaded from CDN');
-                throw new Error('Vosk library not loaded');
+            // Step 1: Check API key
+            loadingLogger.log('info', 'Step 1: Checking API key...');
+            if (!this.apiKey || this.apiKey.trim().length === 0) {
+                loadingLogger.log('error', 'Google Cloud API key not configured');
+                throw new Error('API key required. Please configure it in settings.');
             }
-            loadingLogger.log('success', 'Vosk library found');
+            loadingLogger.log('success', 'API key found');
             
-            // Report progress
-            if (onProgress) onProgress('Loading Vosk model...', 10);
+            if (onProgress) onProgress('Initializing streaming RPC...', 50);
             
-            // Step 2: Check browser compatibility
-            loadingLogger.log('info', 'Step 2: Checking browser compatibility...');
-            if (!browser.hasWebAssembly) {
-                loadingLogger.log('error', 'WebAssembly not supported - Vosk requires WASM');
-                throw new Error('WebAssembly not supported in this browser');
-            }
-            loadingLogger.log('success', 'Browser compatibility OK');
-            
-            if (onProgress) onProgress('Downloading model (~50MB)...', 15);
-            
-            // Step 3: Download and create model
-            loadingLogger.log('info', 'Step 3: Creating Vosk model...');
-            loadingLogger.log('info', `Model URL: ${this.modelUrl}`);
-            loadingLogger.log('info', 'This may take a while on mobile (~50MB download)...');
-            
-            const modelStartTime = Date.now();
-            
-            try {
-                this.model = await Vosk.createModel(this.modelUrl);
-                const modelTime = ((Date.now() - modelStartTime) / 1000).toFixed(1);
-                loadingLogger.log('success', `Model loaded in ${modelTime}s`);
-            } catch (modelError) {
-                loadingLogger.log('error', `Model loading failed: ${modelError.message}`);
-                loadingLogger.log('error', 'This may be due to: network issues, CORS, or memory limits');
-                throw modelError;
-            }
-            
-            if (onProgress) onProgress('Model loaded, setting up recognizer...', 80);
-            
-            // Step 4: Create recognizer
-            loadingLogger.log('info', 'Step 4: Creating Kaldi recognizer...');
-            try {
-                this.recognizer = new this.model.KaldiRecognizer(16000);
-                loadingLogger.log('success', 'Recognizer created (16kHz sample rate)');
-            } catch (recError) {
-                loadingLogger.log('error', `Recognizer creation failed: ${recError.message}`);
-                throw recError;
-            }
-            
-            // Step 5: Set up event handlers
-            loadingLogger.log('info', 'Step 5: Setting up event handlers...');
-            this.recognizer.on('result', (message) => {
-                const result = message.result;
-                if (result && result.text && this.onResult) {
-                    console.log('Vosk final result:', result.text);
-                    this.onResult(result.text, true);
-                }
-            });
-            
-            this.recognizer.on('partialresult', (message) => {
-                const partial = message.result;
-                if (partial && partial.partial && this.onResult) {
-                    console.log('Vosk partial result:', partial.partial);
-                    this.onResult(partial.partial, false);
-                }
-            });
-            loadingLogger.log('success', 'Event handlers configured');
+            // Step 2: Streaming RPC ready
+            loadingLogger.log('info', 'Step 2: Streaming RPC ready');
             
             if (onProgress) onProgress('Ready!', 100);
             
             this.isInitialized = true;
             this.isLoading = false;
-            loadingLogger.log('success', '=== Vosk Initialization Complete ===');
+            loadingLogger.log('success', '=== Google Cloud STT Streaming RPC Initialization Complete ===');
             return true;
             
         } catch (error) {
-            loadingLogger.log('error', `Vosk initialization failed: ${error.message}`);
-            loadingLogger.log('warning', 'Will fall back to Web Speech API if available');
+            loadingLogger.log('error', `Google Cloud STT initialization failed: ${error.message}`);
             this.isLoading = false;
             if (this.onError) this.onError(error);
             throw error;
@@ -347,17 +298,17 @@ class VoskSpeechEngine extends SpeechEngineInterface {
     
     async start() {
         if (!this.isInitialized) {
-            console.error('Vosk not initialized');
+            console.error('Google Cloud STT not initialized');
             return;
         }
         
         if (this.isListening) {
-            console.log('Vosk already listening');
+            console.log('Google Cloud STT already listening');
             return;
         }
         
         try {
-            console.log('Starting Vosk recognition...');
+            console.log('Starting Google Cloud STT streaming recognition...');
             
             // Get microphone access
             this.mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -371,23 +322,38 @@ class VoskSpeechEngine extends SpeechEngineInterface {
             });
             
             // Create audio context
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                sampleRate: 16000
+            });
             
             // Create source node from microphone
             this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
             
             // Create script processor for audio processing
-            // Note: ScriptProcessorNode is deprecated but widely supported
             this.processorNode = this.audioContext.createScriptProcessor(4096, 1, 1);
+            
+            this.audioBuffer = [];
+            this.configSent = false;
+            
+            // Start streaming RPC connection
+            await this.startStreamingRPC();
             
             this.processorNode.onaudioprocess = (event) => {
                 if (!this.isListening) return;
                 
                 try {
-                    // Pass the input buffer directly to Vosk
-                    this.recognizer.acceptWaveform(event.inputBuffer);
+                    const inputData = event.inputBuffer.getChannelData(0);
+                    // Convert Float32Array to Int16Array for Google Cloud API
+                    const int16Data = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        const s = Math.max(-1, Math.min(1, inputData[i]));
+                        int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+                    
+                    // Send audio chunk via streaming RPC
+                    this.sendAudioChunk(int16Data);
                 } catch (error) {
-                    console.error('acceptWaveform failed', error);
+                    console.error('Audio processing failed', error);
                 }
             };
             
@@ -397,19 +363,226 @@ class VoskSpeechEngine extends SpeechEngineInterface {
             
             this.isListening = true;
             if (this.onStart) this.onStart();
-            console.log('Vosk recognition started');
+            console.log('Google Cloud STT streaming recognition started');
             
         } catch (error) {
-            console.error('Failed to start Vosk recognition:', error);
+            console.error('Failed to start Google Cloud STT recognition:', error);
             if (this.onError) this.onError(error);
         }
+    }
+    
+    async startStreamingRPC() {
+        try {
+            // Use streaming recognize endpoint - this uses HTTP/2 streaming for low latency
+            const url = `https://speech.googleapis.com/v1/speech:streamingrecognize?key=${encodeURIComponent(this.apiKey)}`;
+            
+            // Create a ReadableStream for sending audio data
+            const stream = new ReadableStream({
+                start: (controller) => {
+                    this.streamController = controller;
+                    
+                    // Send initial config message (newline-delimited JSON)
+                    const configMessage = {
+                        streamingConfig: {
+                            config: this.recognitionConfig,
+                            interimResults: true,
+                            singleUtterance: false
+                        }
+                    };
+                    
+                    const configJson = JSON.stringify(configMessage) + '\n';
+                    controller.enqueue(new TextEncoder().encode(configJson));
+                    this.configSent = true;
+                    loadingLogger.log('info', 'Streaming RPC config sent');
+                    console.log('Sent streaming config');
+                }
+            });
+            
+            // Start the streaming request with HTTP/2
+            this.streamingRequest = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                body: stream,
+                // Don't cache streaming requests
+                cache: 'no-cache',
+            });
+            
+            if (!this.streamingRequest.ok) {
+                const errorText = await this.streamingRequest.text();
+                let errorData;
+                try {
+                    errorData = JSON.parse(errorText);
+                } catch (e) {
+                    errorData = { error: { message: errorText || `HTTP ${this.streamingRequest.status}` } };
+                }
+                throw new Error(errorData.error?.message || `Streaming API error: ${this.streamingRequest.status}`);
+            }
+            
+            // Read responses from the stream (newline-delimited JSON)
+            this.reader = this.streamingRequest.body.getReader();
+            this.readStream();
+            
+        } catch (error) {
+            console.error('Failed to start streaming RPC:', error);
+            loadingLogger.log('error', `Streaming RPC failed: ${error.message}`);
+            if (this.onError) {
+                if (error.message.includes('API key') || error.message.includes('403') || error.message.includes('401')) {
+                    this.onError(new Error('Invalid API key. Please check your Google Cloud API key in settings.'));
+                } else {
+                    this.onError(error);
+                }
+            }
+        }
+    }
+    
+    async readStream() {
+        let buffer = '';
+        
+        try {
+            while (this.isListening && this.reader) {
+                const { done, value } = await this.reader.read();
+                
+                if (done) {
+                    console.log('Stream ended');
+                    // Process any remaining buffer
+                    if (buffer.trim()) {
+                        const lines = buffer.split('\n').filter(line => line.trim());
+                        for (const line of lines) {
+                            try {
+                                const response = JSON.parse(line);
+                                this.handleStreamResponse(response);
+                            } catch (e) {
+                                console.error('Failed to parse final buffer:', e);
+                            }
+                        }
+                    }
+                    break;
+                }
+                
+                // Accumulate chunks and parse newline-delimited JSON
+                buffer += new TextDecoder().decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                
+                // Keep the last incomplete line in buffer
+                buffer = lines.pop() || '';
+                
+                // Process complete lines
+                for (const line of lines) {
+                    if (line.trim()) {
+                        try {
+                            const response = JSON.parse(line);
+                            this.handleStreamResponse(response);
+                        } catch (e) {
+                            console.error('Failed to parse stream response:', e, 'Line:', line);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error reading stream:', error);
+            loadingLogger.log('error', `Stream read error: ${error.message}`);
+            if (this.onError && this.isListening) {
+                this.onError(error);
+            }
+        }
+    }
+    
+    handleStreamResponse(response) {
+        if (response.error) {
+            console.error('Stream error:', response.error);
+            loadingLogger.log('error', `Stream error: ${response.error.message || 'Unknown error'}`);
+            if (this.onError) {
+                this.onError(new Error(response.error.message || 'Streaming error'));
+            }
+            return;
+        }
+        
+        if (response.results && response.results.length > 0) {
+            for (const result of response.results) {
+                if (result.alternatives && result.alternatives.length > 0) {
+                    const alternative = result.alternatives[0];
+                    if (alternative.transcript) {
+                        const transcript = alternative.transcript.trim();
+                        // Check if this is a final result
+                        const isFinal = result.isFinalAlternative === true || result.stability > 0.9;
+                        
+                        if (transcript && this.onResult) {
+                            console.log(`Google Cloud STT ${isFinal ? 'final' : 'interim'} result:`, transcript);
+                            loadingLogger.log('info', `Received ${isFinal ? 'final' : 'interim'} transcript: ${transcript}`);
+                            this.onResult(transcript, isFinal);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    sendAudioChunk(audioData) {
+        if (!this.streamController || !this.configSent || !this.isListening) {
+            return;
+        }
+        
+        try {
+            // Convert Int16Array to base64
+            const base64Audio = this.int16ToBase64(audioData);
+            
+            // Send audio data message (newline-delimited JSON)
+            const audioMessage = {
+                audioContent: base64Audio
+            };
+            
+            const audioJson = JSON.stringify(audioMessage) + '\n';
+            this.streamController.enqueue(new TextEncoder().encode(audioJson));
+        } catch (error) {
+            console.error('Failed to send audio chunk:', error);
+            loadingLogger.log('error', `Failed to send audio chunk: ${error.message}`);
+        }
+    }
+    
+    int16ToBase64(int16Array) {
+        // Convert Int16Array to ArrayBuffer, then to base64
+        const buffer = new ArrayBuffer(int16Array.length * 2);
+        const view = new DataView(buffer);
+        for (let i = 0; i < int16Array.length; i++) {
+            view.setInt16(i * 2, int16Array[i], true); // littleEndian
+        }
+        
+        // Convert to base64
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
     }
     
     stop() {
         if (!this.isListening) return;
         
-        console.log('Stopping Vosk recognition...');
+        console.log('Stopping Google Cloud STT recognition...');
         this.isListening = false;
+        
+        // Close the stream
+        if (this.streamController) {
+            try {
+                this.streamController.close();
+            } catch (e) {}
+            this.streamController = null;
+        }
+        
+        if (this.reader) {
+            try {
+                this.reader.cancel();
+            } catch (e) {}
+            this.reader = null;
+        }
+        
+        if (this.streamingRequest) {
+            this.streamingRequest = null;
+        }
         
         // Disconnect and clean up audio nodes
         if (this.processorNode) {
@@ -433,27 +606,15 @@ class VoskSpeechEngine extends SpeechEngineInterface {
             this.mediaStream = null;
         }
         
+        this.audioBuffer = [];
+        this.configSent = false;
+        
         if (this.onEnd) this.onEnd();
-        console.log('Vosk recognition stopped');
+        console.log('Google Cloud STT recognition stopped');
     }
     
     destroy() {
         this.stop();
-        
-        if (this.recognizer) {
-            try {
-                this.recognizer.remove();
-            } catch (e) {}
-            this.recognizer = null;
-        }
-        
-        if (this.model) {
-            try {
-                this.model.terminate();
-            } catch (e) {}
-            this.model = null;
-        }
-        
         this.isInitialized = false;
     }
 }
@@ -596,13 +757,19 @@ class WebSpeechEngine extends SpeechEngineInterface {
 class SpeechEngineManager {
     constructor() {
         this.engines = {
-            vosk: new VoskSpeechEngine(),
+            googlecloud: new GoogleCloudSpeechEngine(),
             webspeech: new WebSpeechEngine()
         };
         this.currentEngine = null;
-        this.currentEngineName = 'vosk';  // Default to Vosk
+        this.currentEngineName = 'googlecloud';  // Default to Google Cloud STT
         this.onResult = null;
         this.onError = null;
+    }
+    
+    setApiKey(apiKey) {
+        if (this.engines.googlecloud) {
+            this.engines.googlecloud.setApiKey(apiKey);
+        }
     }
     
     async setEngine(engineName, onProgress) {
@@ -913,10 +1080,20 @@ function loadSettings() {
             elements.guessTimeInput.value = settings.guessTime || 3;
             elements.voiceTimeInput.value = settings.voiceTime || 10;
             
-            // Load speech engine setting (default to vosk)
-            const engine = settings.speechEngine || 'vosk';
+            // Load speech engine setting (default to googlecloud)
+            const engine = settings.speechEngine || 'googlecloud';
             elements.speechEngineInput.value = engine;
             updateEngineButtonsUI(engine);
+            
+            // Load API key if available
+            if (settings.googleCloudApiKey) {
+                const apiKeyInput = document.getElementById('google-cloud-api-key');
+                if (apiKeyInput) {
+                    apiKeyInput.value = settings.googleCloudApiKey;
+                }
+                // Set API key in engine
+                speechEngine.setApiKey(settings.googleCloudApiKey);
+            }
         }
     } catch (e) {
         console.log('Could not load settings:', e);
@@ -925,12 +1102,19 @@ function loadSettings() {
 
 function saveSettingsToStorage() {
     try {
+        const apiKeyInput = document.getElementById('google-cloud-api-key');
         const settings = {
             guessTime: parseInt(elements.guessTimeInput.value) || 3,
             voiceTime: parseInt(elements.voiceTimeInput.value) || 10,
-            speechEngine: elements.speechEngineInput.value || 'vosk'
+            speechEngine: elements.speechEngineInput.value || 'googlecloud',
+            googleCloudApiKey: apiKeyInput ? apiKeyInput.value.trim() : ''
         };
         localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+        
+        // Update API key in engine
+        if (settings.googleCloudApiKey) {
+            speechEngine.setApiKey(settings.googleCloudApiKey);
+        }
     } catch (e) {
         console.log('Could not save settings:', e);
     }
@@ -988,66 +1172,53 @@ function showLoadingOverlay(show, status = '', progress = 0) {
 
 // Initialize the selected speech engine
 async function initializeSelectedEngine() {
-    const selectedEngine = elements.speechEngineInput.value || 'vosk';
+    const selectedEngine = elements.speechEngineInput.value || 'googlecloud';
     const browser = detectBrowserCapabilities();
     
     loadingLogger.log('info', '=== Initializing Speech Engine ===');
     loadingLogger.log('info', `Selected engine: ${selectedEngine}`);
     loadingLogger.log('info', `Android: ${browser.isAndroid}, Chrome: ${browser.isChrome}, Mobile: ${browser.isMobile}`);
     
-    // Android Chrome recommendation: Web Speech API works better
-    if (browser.isAndroid && browser.isChrome && selectedEngine === 'vosk') {
-        loadingLogger.log('warning', 'Android Chrome detected - Vosk may have issues');
-        loadingLogger.log('info', 'Web Speech API is recommended for Android Chrome');
-    }
-    
     try {
-        if (selectedEngine === 'vosk') {
-            // Check if Vosk is available
-            loadingLogger.log('info', 'Checking Vosk availability...');
-            if (typeof Vosk === 'undefined') {
-                loadingLogger.log('warning', 'Vosk library not loaded from CDN');
-                loadingLogger.log('info', 'Falling back to Web Speech API');
-                elements.speechEngineInput.value = 'webspeech';
-                updateEngineButtonsUI('webspeech');
-                updateEngineStatus('error', 'Vosk not available, using Web Speech');
-                await speechEngine.setEngine('webspeech');
-                loadingLogger.log('success', 'Web Speech API initialized as fallback');
-                speechEngine.onResult = handleSpeechResult;
-                speechEngine.onError = handleSpeechError;
-                return true;
+        if (selectedEngine === 'googlecloud') {
+            // Check if API key is configured
+            loadingLogger.log('info', 'Checking Google Cloud STT configuration...');
+            const apiKeyInput = document.getElementById('google-cloud-api-key');
+            const apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
+            
+            if (!apiKey) {
+                loadingLogger.log('error', 'Google Cloud API key not configured');
+                updateEngineStatus('error', 'API key required in settings');
+                alert('Please configure your Google Cloud API key in settings before starting the game.');
+                return false;
             }
             
-            // Show loading overlay for Vosk
-            loadingLogger.log('info', 'Starting Vosk initialization...');
-            showLoadingOverlay(true, 'Initializing Vosk...', 5);
-            updateEngineStatus('loading', 'Loading Vosk model...');
+            // Set API key in engine
+            speechEngine.setApiKey(apiKey);
             
-            // Add timeout warning for mobile
-            let timeoutWarningShown = false;
-            const timeoutWarning = setTimeout(() => {
-                if (!timeoutWarningShown) {
-                    timeoutWarningShown = true;
-                    loadingLogger.log('warning', 'Loading taking longer than expected...');
-                    loadingLogger.log('info', 'On mobile, this can take 1-2 minutes');
-                    loadingLogger.log('info', 'If stuck, try Web Speech API instead');
-                }
-            }, 15000);
+            if (!speechEngine.engines.googlecloud.isAvailable()) {
+                loadingLogger.log('error', 'Google Cloud STT not available - API key missing');
+                updateEngineStatus('error', 'API key required');
+                return false;
+            }
+            
+            // Show loading overlay
+            loadingLogger.log('info', 'Starting Google Cloud STT initialization...');
+            showLoadingOverlay(true, 'Initializing Google Cloud STT...', 5);
+            updateEngineStatus('loading', 'Connecting to Google Cloud...');
             
             try {
-                await speechEngine.setEngine('vosk', (status, progress) => {
+                await speechEngine.setEngine('googlecloud', (status, progress) => {
                     showLoadingOverlay(true, status, progress);
                     loadingLogger.log('info', `Progress: ${progress}% - ${status}`);
                 });
                 
-                clearTimeout(timeoutWarning);
                 showLoadingOverlay(false);
-                updateEngineStatus('ready', 'Vosk ready (offline)');
-                loadingLogger.log('success', 'Vosk engine ready');
+                updateEngineStatus('ready', 'Google Cloud STT ready');
+                loadingLogger.log('success', 'Google Cloud STT engine ready');
                 
-            } catch (voskError) {
-                clearTimeout(timeoutWarning);
-                throw voskError;
+            } catch (googleError) {
+                throw googleError;
             }
             
         } else {
@@ -1078,7 +1249,7 @@ async function initializeSelectedEngine() {
         updateEngineStatus('error', 'Failed to initialize: ' + error.message);
         
         // Try to fall back to Web Speech
-        if (selectedEngine === 'vosk' && speechEngine.engines.webspeech.isAvailable()) {
+        if (selectedEngine === 'googlecloud' && speechEngine.engines.webspeech.isAvailable()) {
             loadingLogger.log('info', 'Attempting fallback to Web Speech API...');
             elements.speechEngineInput.value = 'webspeech';
             updateEngineButtonsUI('webspeech');
@@ -1164,8 +1335,12 @@ function clearAllData() {
         localStorage.removeItem(STORAGE_KEYS.SCORES);
         elements.guessTimeInput.value = 3;
         elements.voiceTimeInput.value = 10;
-        elements.speechEngineInput.value = 'vosk';
-        updateEngineButtonsUI('vosk');
+        elements.speechEngineInput.value = 'googlecloud';
+        updateEngineButtonsUI('googlecloud');
+        const apiKeyInput = document.getElementById('google-cloud-api-key');
+        if (apiKeyInput) {
+            apiKeyInput.value = '';
+        }
         alert('All scores and settings have been cleared!');
     } catch (e) {
         console.log('Could not clear data:', e);
@@ -1179,10 +1354,11 @@ function clearAllData() {
 // This function is kept for backward compatibility but now uses the engine manager
 function initSpeechRecognition() {
     // Check if we have any speech engine available
-    const hasVosk = typeof Vosk !== 'undefined';
     const hasWebSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    const apiKeyInput = document.getElementById('google-cloud-api-key');
+    const hasGoogleCloud = apiKeyInput && apiKeyInput.value.trim().length > 0;
     
-    if (!hasVosk && !hasWebSpeech) {
+    if (!hasGoogleCloud && !hasWebSpeech) {
         showBrowserWarning();
         return false;
     }
@@ -1771,11 +1947,17 @@ elements.engineBtns.forEach(btn => {
         updateEngineButtonsUI(engine);
         
         // Update status to show engine needs to be initialized
-        if (engine === 'vosk') {
-            if (speechEngine.engines.vosk.isInitialized) {
-                updateEngineStatus('ready', 'Vosk ready (offline)');
+        if (engine === 'googlecloud') {
+            const apiKeyInput = document.getElementById('google-cloud-api-key');
+            const hasApiKey = apiKeyInput && apiKeyInput.value.trim().length > 0;
+            if (hasApiKey) {
+                if (speechEngine.engines.googlecloud.isInitialized) {
+                    updateEngineStatus('ready', 'Google Cloud STT ready');
+                } else {
+                    updateEngineStatus('', 'Google Cloud STT will initialize when you start');
+                }
             } else {
-                updateEngineStatus('', 'Vosk will load when you start');
+                updateEngineStatus('error', 'API key required in settings');
             }
         } else {
             updateEngineStatus('ready', 'Web Speech ready (online)');
@@ -1948,49 +2130,24 @@ loadingLogger.init();
 
 // Check available engines and update status on page load
 function checkEnginesOnLoad() {
-    const hasVosk = typeof Vosk !== 'undefined';
     const hasWebSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
     const browser = detectBrowserCapabilities();
+    const apiKeyInput = document.getElementById('google-cloud-api-key');
+    const hasGoogleCloudApiKey = apiKeyInput && apiKeyInput.value.trim().length > 0;
     
     loadingLogger.log('info', '=== Checking Available Engines ===');
-    loadingLogger.log('info', `Vosk library loaded: ${hasVosk}`);
+    loadingLogger.log('info', `Google Cloud API key configured: ${hasGoogleCloudApiKey}`);
     loadingLogger.log('info', `Web Speech API available: ${hasWebSpeech}`);
     
-    const selectedEngine = elements.speechEngineInput.value || 'vosk';
+    const selectedEngine = elements.speechEngineInput.value || 'googlecloud';
     
-    // For Android Chrome, recommend Web Speech API
-    if (browser.isAndroid && browser.isChrome) {
-        loadingLogger.log('info', 'Android Chrome detected');
-        if (hasWebSpeech) {
-            loadingLogger.log('info', 'Recommendation: Use Web Speech API for better compatibility');
-            // Auto-switch to Web Speech for Android Chrome if Vosk is selected
-            if (selectedEngine === 'vosk' && hasWebSpeech) {
-                loadingLogger.log('info', 'Auto-selecting Web Speech for Android Chrome');
-                elements.speechEngineInput.value = 'webspeech';
-                updateEngineButtonsUI('webspeech');
-                updateEngineStatus('ready', 'Web Speech ready (recommended for Android)');
-                saveSettingsToStorage();
-                return;
-            }
-        }
-    }
-    
-    if (selectedEngine === 'vosk') {
-        if (hasVosk) {
-            updateEngineStatus('', 'Vosk will load when you start');
-            loadingLogger.log('info', 'Vosk selected - will load on game start');
+    if (selectedEngine === 'googlecloud') {
+        if (hasGoogleCloudApiKey) {
+            updateEngineStatus('', 'Google Cloud STT will initialize when you start');
+            loadingLogger.log('info', 'Google Cloud STT selected - will initialize on game start');
         } else {
-            // Fall back to Web Speech
-            loadingLogger.log('warning', 'Vosk library not available');
-            elements.speechEngineInput.value = 'webspeech';
-            updateEngineButtonsUI('webspeech');
-            if (hasWebSpeech) {
-                updateEngineStatus('ready', 'Using Web Speech (Vosk unavailable)');
-                loadingLogger.log('info', 'Switched to Web Speech API');
-            } else {
-                updateEngineStatus('error', 'No speech engine available');
-                loadingLogger.log('error', 'No speech recognition available!');
-            }
+            updateEngineStatus('error', 'API key required in settings');
+            loadingLogger.log('warning', 'Google Cloud API key not configured');
         }
     } else {
         if (hasWebSpeech) {
@@ -2005,7 +2162,7 @@ function checkEnginesOnLoad() {
     loadingLogger.log('info', '=== Engine Check Complete ===');
 }
 
-// Run initial check after a short delay to ensure Vosk script has loaded
+// Run initial check after a short delay
 setTimeout(checkEnginesOnLoad, 500);
 
 console.log('🎬 Emoji Movie Guessing Game loaded!');
