@@ -13,6 +13,20 @@
 </head>
 <body>
     <canvas id="confetti-canvas"></canvas>
+    
+    <!-- Loading overlay for Vosk model -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <h2>Loading Speech Engine</h2>
+            <p id="loading-status">Initializing Vosk...</p>
+            <div class="loading-progress">
+                <div id="loading-progress-bar" class="loading-progress-bar"></div>
+            </div>
+            <p class="loading-hint">This only happens once</p>
+        </div>
+    </div>
+    
     <div class="game-container">
         <!-- Start Screen / Home Page -->
         <div id="start-screen" class="screen active">
@@ -74,6 +88,31 @@
                     <button id="close-settings" class="close-btn">✕</button>
                 </div>
                 
+                <div class="settings-section">
+                    <h3>Speech Recognition</h3>
+                    <div class="setting-label" style="margin-bottom: 10px;">
+                        <span class="setting-emoji">🎙️</span>
+                        <span>Speech Engine</span>
+                    </div>
+                    <div class="engine-selector">
+                        <button class="engine-btn active" data-engine="vosk">
+                            <span class="engine-icon">⚡</span>
+                            <span class="engine-name">Vosk</span>
+                            <span class="engine-desc">Offline • Fast</span>
+                        </button>
+                        <button class="engine-btn" data-engine="webspeech">
+                            <span class="engine-icon">☁️</span>
+                            <span class="engine-name">Web Speech</span>
+                            <span class="engine-desc">Online • Accurate</span>
+                        </button>
+                    </div>
+                    <input type="hidden" id="speech-engine" value="vosk">
+                    <div id="engine-status" class="engine-status">
+                        <span class="status-icon">⏳</span>
+                        <span class="status-text">Vosk model not loaded</span>
+                    </div>
+                </div>
+
                 <div class="settings-section">
                     <h3>Game Timing</h3>
                     <div class="setting-item">
@@ -218,6 +257,8 @@
         </div>
     </div>
 
+    <!-- Vosk Speech Recognition Library -->
+    <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
     <script src="game.js"></script>
 </body>
 </html>

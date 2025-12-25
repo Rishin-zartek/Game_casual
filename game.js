@@ -64,6 +64,419 @@ const STORAGE_KEYS = {
     SCORES: 'emojiQuiz_scores'
 };
 
+// ============================================
+// SPEECH ENGINE ABSTRACTION LAYER
+// ============================================
+
+// Speech Engine Interface - both engines implement this
+class SpeechEngineInterface {
+    constructor() {
+        this.onResult = null;  // callback(transcript, isFinal)
+        this.onError = null;   // callback(error)
+        this.onStart = null;   // callback()
+        this.onEnd = null;     // callback()
+        this.isListening = false;
+    }
+    
+    async initialize() { throw new Error('Not implemented'); }
+    start() { throw new Error('Not implemented'); }
+    stop() { throw new Error('Not implemented'); }
+    destroy() { throw new Error('Not implemented'); }
+    isAvailable() { return false; }
+    getName() { return 'Unknown'; }
+}
+
+// ============================================
+// VOSK SPEECH ENGINE (Offline)
+// ============================================
+
+class VoskSpeechEngine extends SpeechEngineInterface {
+    constructor() {
+        super();
+        this.model = null;
+        this.recognizer = null;
+        this.audioContext = null;
+        this.mediaStream = null;
+        this.sourceNode = null;
+        this.processorNode = null;
+        this.isInitialized = false;
+        this.isLoading = false;
+        
+        // Vosk model URL - small English model (~50MB)
+        // Using a smaller model for faster loading
+        this.modelUrl = 'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip';
+    }
+    
+    getName() { return 'Vosk (Offline)'; }
+    
+    isAvailable() {
+        return typeof Vosk !== 'undefined';
+    }
+    
+    async initialize(onProgress) {
+        if (this.isInitialized) return true;
+        if (this.isLoading) return false;
+        
+        this.isLoading = true;
+        
+        try {
+            console.log('Initializing Vosk speech engine...');
+            
+            if (typeof Vosk === 'undefined') {
+                throw new Error('Vosk library not loaded');
+            }
+            
+            // Report progress
+            if (onProgress) onProgress('Loading Vosk model...', 10);
+            
+            // Create model - Vosk will handle downloading/caching
+            console.log('Creating Vosk model from:', this.modelUrl);
+            
+            this.model = await Vosk.createModel(this.modelUrl);
+            
+            if (onProgress) onProgress('Model loaded, setting up recognizer...', 80);
+            
+            // Create recognizer (sample rate will be set when we start audio)
+            this.recognizer = new this.model.KaldiRecognizer(16000);
+            
+            // Set up result handler
+            this.recognizer.on('result', (message) => {
+                const result = message.result;
+                if (result && result.text && this.onResult) {
+                    console.log('Vosk final result:', result.text);
+                    this.onResult(result.text, true);
+                }
+            });
+            
+            this.recognizer.on('partialresult', (message) => {
+                const partial = message.result;
+                if (partial && partial.partial && this.onResult) {
+                    console.log('Vosk partial result:', partial.partial);
+                    this.onResult(partial.partial, false);
+                }
+            });
+            
+            if (onProgress) onProgress('Ready!', 100);
+            
+            this.isInitialized = true;
+            this.isLoading = false;
+            console.log('Vosk speech engine initialized successfully');
+            return true;
+            
+        } catch (error) {
+            console.error('Failed to initialize Vosk:', error);
+            this.isLoading = false;
+            if (this.onError) this.onError(error);
+            throw error;
+        }
+    }
+    
+    async start() {
+        if (!this.isInitialized) {
+            console.error('Vosk not initialized');
+            return;
+        }
+        
+        if (this.isListening) {
+            console.log('Vosk already listening');
+            return;
+        }
+        
+        try {
+            console.log('Starting Vosk recognition...');
+            
+            // Get microphone access
+            this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                video: false,
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    channelCount: 1,
+                    sampleRate: 16000
+                }
+            });
+            
+            // Create audio context
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // Create source node from microphone
+            this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
+            
+            // Create script processor for audio processing
+            // Note: ScriptProcessorNode is deprecated but widely supported
+            this.processorNode = this.audioContext.createScriptProcessor(4096, 1, 1);
+            
+            this.processorNode.onaudioprocess = (event) => {
+                if (!this.isListening) return;
+                
+                try {
+                    // Pass the input buffer directly to Vosk
+                    this.recognizer.acceptWaveform(event.inputBuffer);
+                } catch (error) {
+                    console.error('acceptWaveform failed', error);
+                }
+            };
+            
+            // Connect nodes
+            this.sourceNode.connect(this.processorNode);
+            this.processorNode.connect(this.audioContext.destination);
+            
+            this.isListening = true;
+            if (this.onStart) this.onStart();
+            console.log('Vosk recognition started');
+            
+        } catch (error) {
+            console.error('Failed to start Vosk recognition:', error);
+            if (this.onError) this.onError(error);
+        }
+    }
+    
+    stop() {
+        if (!this.isListening) return;
+        
+        console.log('Stopping Vosk recognition...');
+        this.isListening = false;
+        
+        // Disconnect and clean up audio nodes
+        if (this.processorNode) {
+            this.processorNode.disconnect();
+            this.processorNode = null;
+        }
+        
+        if (this.sourceNode) {
+            this.sourceNode.disconnect();
+            this.sourceNode = null;
+        }
+        
+        if (this.audioContext) {
+            this.audioContext.close().catch(() => {});
+            this.audioContext = null;
+        }
+        
+        // Stop media stream
+        if (this.mediaStream) {
+            this.mediaStream.getTracks().forEach(track => track.stop());
+            this.mediaStream = null;
+        }
+        
+        if (this.onEnd) this.onEnd();
+        console.log('Vosk recognition stopped');
+    }
+    
+    destroy() {
+        this.stop();
+        
+        if (this.recognizer) {
+            try {
+                this.recognizer.remove();
+            } catch (e) {}
+            this.recognizer = null;
+        }
+        
+        if (this.model) {
+            try {
+                this.model.terminate();
+            } catch (e) {}
+            this.model = null;
+        }
+        
+        this.isInitialized = false;
+    }
+}
+
+// ============================================
+// WEB SPEECH API ENGINE (Online)
+// ============================================
+
+class WebSpeechEngine extends SpeechEngineInterface {
+    constructor() {
+        super();
+        this.recognition = null;
+        this.isInitialized = false;
+    }
+    
+    getName() { return 'Web Speech API (Online)'; }
+    
+    isAvailable() {
+        return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    }
+    
+    async initialize() {
+        if (this.isInitialized) return true;
+        
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        
+        if (!SpeechRecognition) {
+            throw new Error('Web Speech API not supported');
+        }
+        
+        this.recognition = new SpeechRecognition();
+        this.recognition.continuous = true;
+        this.recognition.interimResults = true;
+        this.recognition.lang = 'en-US';
+        
+        this.recognition.onresult = (event) => {
+            let finalTranscript = '';
+            let interimTranscript = '';
+            
+            for (let i = 0; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    finalTranscript += transcript + ' ';
+                } else {
+                    interimTranscript += transcript + ' ';
+                }
+            }
+            
+            const text = (finalTranscript + interimTranscript).trim();
+            const isFinal = finalTranscript.trim().length > 0;
+            
+            if (text && this.onResult) {
+                this.onResult(text, isFinal);
+            }
+        };
+        
+        this.recognition.onerror = (event) => {
+            console.log('Web Speech error:', event.error);
+            if (event.error === 'not-allowed' && this.onError) {
+                this.onError(new Error('Microphone access denied'));
+            }
+        };
+        
+        this.recognition.onstart = () => {
+            this.isListening = true;
+            if (this.onStart) this.onStart();
+        };
+        
+        this.recognition.onend = () => {
+            const wasListening = this.isListening;
+            this.isListening = false;
+            if (this.onEnd) this.onEnd();
+            
+            // Auto-restart if we're supposed to be listening
+            if (wasListening && this._shouldRestart) {
+                try {
+                    this.recognition.start();
+                } catch (e) {
+                    // Already started or error
+                }
+            }
+        };
+        
+        this._shouldRestart = false;
+        this.isInitialized = true;
+        console.log('Web Speech engine initialized');
+        return true;
+    }
+    
+    start() {
+        if (!this.isInitialized) return;
+        
+        this._shouldRestart = true;
+        try {
+            this.recognition.start();
+        } catch (e) {
+            console.log('Web Speech start error (may already be running):', e.message);
+        }
+    }
+    
+    stop() {
+        if (!this.isInitialized) return;
+        
+        this._shouldRestart = false;
+        try {
+            this.recognition.stop();
+        } catch (e) {
+            // Ignore
+        }
+        this.isListening = false;
+    }
+    
+    destroy() {
+        this.stop();
+        this.recognition = null;
+        this.isInitialized = false;
+    }
+}
+
+// ============================================
+// SPEECH ENGINE MANAGER
+// ============================================
+
+class SpeechEngineManager {
+    constructor() {
+        this.engines = {
+            vosk: new VoskSpeechEngine(),
+            webspeech: new WebSpeechEngine()
+        };
+        this.currentEngine = null;
+        this.currentEngineName = 'vosk';  // Default to Vosk
+        this.onResult = null;
+        this.onError = null;
+    }
+    
+    async setEngine(engineName, onProgress) {
+        // Stop current engine if running
+        if (this.currentEngine) {
+            this.currentEngine.stop();
+        }
+        
+        const engine = this.engines[engineName];
+        if (!engine) {
+            throw new Error(`Unknown engine: ${engineName}`);
+        }
+        
+        if (!engine.isAvailable()) {
+            throw new Error(`Engine ${engineName} is not available`);
+        }
+        
+        // Initialize the engine
+        await engine.initialize(onProgress);
+        
+        this.currentEngine = engine;
+        this.currentEngineName = engineName;
+        
+        // Wire up callbacks
+        engine.onResult = (transcript, isFinal) => {
+            if (this.onResult) this.onResult(transcript, isFinal);
+        };
+        
+        engine.onError = (error) => {
+            if (this.onError) this.onError(error);
+        };
+        
+        console.log(`Switched to speech engine: ${engine.getName()}`);
+        return engine;
+    }
+    
+    start() {
+        if (this.currentEngine) {
+            this.currentEngine.start();
+        }
+    }
+    
+    stop() {
+        if (this.currentEngine) {
+            this.currentEngine.stop();
+        }
+    }
+    
+    isListening() {
+        return this.currentEngine ? this.currentEngine.isListening : false;
+    }
+    
+    isInitialized() {
+        return this.currentEngine ? this.currentEngine.isInitialized : false;
+    }
+    
+    getCurrentEngineName() {
+        return this.currentEngineName;
+    }
+}
+
+// Global speech engine manager
+const speechEngine = new SpeechEngineManager();
+
 // Game State
 class GameState {
     constructor() {
@@ -78,7 +491,7 @@ class GameState {
         this.isGameActive = false;
         this.currentPhase = 'guess'; // 'guess' or 'voice'
         this.timerInterval = null;
-        this.recognition = null;
+        // Note: recognition is now handled by speechEngine manager
         this.recognizedText = '';
         this.voicePhaseStartTime = null;
         this.answerTime = null;
@@ -250,6 +663,11 @@ const elements = {
     resultsScreen: document.getElementById('results-screen'),
     countdownScreen: document.getElementById('countdown-screen'),
     
+    // Loading overlay
+    loadingOverlay: document.getElementById('loading-overlay'),
+    loadingStatus: document.getElementById('loading-status'),
+    loadingProgressBar: document.getElementById('loading-progress-bar'),
+    
     // Settings
     settingsBtn: document.getElementById('settings-btn'),
     settingsModal: document.getElementById('settings-modal'),
@@ -258,6 +676,9 @@ const elements = {
     clearDataBtn: document.getElementById('clear-data-btn'),
     guessTimeInput: document.getElementById('guess-time'),
     voiceTimeInput: document.getElementById('voice-time'),
+    speechEngineInput: document.getElementById('speech-engine'),
+    engineStatus: document.getElementById('engine-status'),
+    engineBtns: document.querySelectorAll('.engine-btn'),
     
     // Start screen
     startBtn: document.getElementById('start-btn'),
@@ -301,6 +722,11 @@ function loadSettings() {
             const settings = JSON.parse(saved);
             elements.guessTimeInput.value = settings.guessTime || 3;
             elements.voiceTimeInput.value = settings.voiceTime || 10;
+            
+            // Load speech engine setting (default to vosk)
+            const engine = settings.speechEngine || 'vosk';
+            elements.speechEngineInput.value = engine;
+            updateEngineButtonsUI(engine);
         }
     } catch (e) {
         console.log('Could not load settings:', e);
@@ -311,11 +737,157 @@ function saveSettingsToStorage() {
     try {
         const settings = {
             guessTime: parseInt(elements.guessTimeInput.value) || 3,
-            voiceTime: parseInt(elements.voiceTimeInput.value) || 10
+            voiceTime: parseInt(elements.voiceTimeInput.value) || 10,
+            speechEngine: elements.speechEngineInput.value || 'vosk'
         };
         localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
     } catch (e) {
         console.log('Could not save settings:', e);
+    }
+}
+
+// Update engine button UI state
+function updateEngineButtonsUI(selectedEngine) {
+    elements.engineBtns.forEach(btn => {
+        const engine = btn.dataset.engine;
+        if (engine === selectedEngine) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+}
+
+// Update engine status display
+function updateEngineStatus(status, message) {
+    const statusEl = elements.engineStatus;
+    statusEl.className = 'engine-status ' + status;
+    
+    let icon = '⏳';
+    if (status === 'ready') icon = '✅';
+    else if (status === 'loading') icon = '⏳';
+    else if (status === 'error') icon = '❌';
+    
+    statusEl.innerHTML = `
+        <span class="status-icon">${icon}</span>
+        <span class="status-text">${message}</span>
+    `;
+}
+
+// Show/hide loading overlay
+function showLoadingOverlay(show, status = '', progress = 0) {
+    if (show) {
+        elements.loadingOverlay.classList.add('active');
+        if (status) {
+            elements.loadingStatus.textContent = status;
+        }
+        elements.loadingProgressBar.style.width = progress + '%';
+    } else {
+        elements.loadingOverlay.classList.remove('active');
+    }
+}
+
+// Initialize the selected speech engine
+async function initializeSelectedEngine() {
+    const selectedEngine = elements.speechEngineInput.value || 'vosk';
+    
+    console.log('Initializing speech engine:', selectedEngine);
+    
+    try {
+        if (selectedEngine === 'vosk') {
+            // Check if Vosk is available
+            if (typeof Vosk === 'undefined') {
+                console.warn('Vosk not available, falling back to Web Speech');
+                elements.speechEngineInput.value = 'webspeech';
+                updateEngineButtonsUI('webspeech');
+                updateEngineStatus('error', 'Vosk not available, using Web Speech');
+                await speechEngine.setEngine('webspeech');
+                return true;
+            }
+            
+            // Show loading overlay for Vosk
+            showLoadingOverlay(true, 'Initializing Vosk...', 5);
+            updateEngineStatus('loading', 'Loading Vosk model...');
+            
+            await speechEngine.setEngine('vosk', (status, progress) => {
+                showLoadingOverlay(true, status, progress);
+            });
+            
+            showLoadingOverlay(false);
+            updateEngineStatus('ready', 'Vosk ready (offline)');
+            
+        } else {
+            // Web Speech API
+            if (!speechEngine.engines.webspeech.isAvailable()) {
+                updateEngineStatus('error', 'Web Speech not supported');
+                showBrowserWarning();
+                return false;
+            }
+            
+            await speechEngine.setEngine('webspeech');
+            updateEngineStatus('ready', 'Web Speech ready (online)');
+        }
+        
+        // Set up callbacks
+        speechEngine.onResult = handleSpeechResult;
+        speechEngine.onError = handleSpeechError;
+        
+        return true;
+        
+    } catch (error) {
+        console.error('Failed to initialize speech engine:', error);
+        showLoadingOverlay(false);
+        updateEngineStatus('error', 'Failed to initialize: ' + error.message);
+        
+        // Try to fall back to Web Speech
+        if (selectedEngine === 'vosk' && speechEngine.engines.webspeech.isAvailable()) {
+            console.log('Falling back to Web Speech API');
+            elements.speechEngineInput.value = 'webspeech';
+            updateEngineButtonsUI('webspeech');
+            try {
+                await speechEngine.setEngine('webspeech');
+                speechEngine.onResult = handleSpeechResult;
+                speechEngine.onError = handleSpeechError;
+                updateEngineStatus('ready', 'Fell back to Web Speech (online)');
+                return true;
+            } catch (e) {
+                console.error('Fallback also failed:', e);
+            }
+        }
+        
+        return false;
+    }
+}
+
+// Handle speech recognition results
+function handleSpeechResult(transcript, isFinal) {
+    gameState.lastSpeechTime = Date.now();
+    gameState.isProcessingAudio = !isFinal;
+    
+    if (transcript) {
+        gameState.recognizedText = transcript;
+        elements.recognizedText.textContent = `"${gameState.recognizedText}"`;
+    }
+    
+    console.log(`Speech result - Text: "${transcript}", Final: ${isFinal}`);
+    
+    // Check for correct answer
+    if (transcript && gameState.voicePhaseStartTime && !gameState.correctAnswerDetected) {
+        const question = MOVIE_QUESTIONS[gameState.currentQuestionIndex];
+        if (checkAnswerMatch(transcript, question)) {
+            gameState.answerTime = Date.now() - gameState.voicePhaseStartTime;
+            gameState.correctAnswerDetected = true;
+            console.log(`Correct answer detected at ${gameState.answerTime}ms`);
+            gameState.hasReceivedFinalConfirmation = true;
+        }
+    }
+}
+
+// Handle speech recognition errors
+function handleSpeechError(error) {
+    console.error('Speech recognition error:', error);
+    if (error.message === 'Microphone access denied') {
+        alert('Microphone access denied. Please allow microphone access to play the game.');
     }
 }
 
@@ -353,6 +925,8 @@ function clearAllData() {
         localStorage.removeItem(STORAGE_KEYS.SCORES);
         elements.guessTimeInput.value = 3;
         elements.voiceTimeInput.value = 10;
+        elements.speechEngineInput.value = 'vosk';
+        updateEngineButtonsUI('vosk');
         alert('All scores and settings have been cleared!');
     } catch (e) {
         console.log('Could not clear data:', e);
@@ -360,111 +934,21 @@ function clearAllData() {
 }
 
 // ============================================
-// SPEECH RECOGNITION
+// SPEECH RECOGNITION (Legacy wrapper for compatibility)
 // ============================================
 
+// This function is kept for backward compatibility but now uses the engine manager
 function initSpeechRecognition() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    // Check if we have any speech engine available
+    const hasVosk = typeof Vosk !== 'undefined';
+    const hasWebSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
     
-    if (!SpeechRecognition) {
+    if (!hasVosk && !hasWebSpeech) {
         showBrowserWarning();
         return false;
     }
     
-    gameState.recognition = new SpeechRecognition();
-    gameState.recognition.continuous = true;
-    gameState.recognition.interimResults = true;
-    gameState.recognition.lang = 'en-US';
-    
-    gameState.recognition.onresult = (event) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
-        let hasInterim = false;
-        
-        for (let i = 0; i < event.results.length; i++) {
-            const transcript = event.results[i][0].transcript;
-            if (event.results[i].isFinal) {
-                finalTranscript += transcript + ' ';
-            } else {
-                interimTranscript += transcript + ' ';
-                hasInterim = true;
-            }
-        }
-        
-        gameState.lastSpeechTime = Date.now();
-        gameState.isProcessingAudio = hasInterim;
-        
-        const newText = (finalTranscript + interimTranscript).trim();
-        if (newText) {
-            gameState.recognizedText = newText;
-            elements.recognizedText.textContent = `"${gameState.recognizedText}"`;
-        }
-        
-        console.log(`Speech result - Final: "${finalTranscript.trim()}", Interim: "${interimTranscript.trim()}"`);
-        
-        if (newText && gameState.voicePhaseStartTime && !gameState.correctAnswerDetected) {
-            const question = MOVIE_QUESTIONS[gameState.currentQuestionIndex];
-            if (checkAnswerMatch(newText, question)) {
-                gameState.answerTime = Date.now() - gameState.voicePhaseStartTime;
-                gameState.correctAnswerDetected = true;
-                console.log(`Correct answer detected at ${gameState.answerTime}ms`);
-                gameState.hasReceivedFinalConfirmation = true;
-            }
-        }
-    };
-    
-    gameState.recognition.onerror = (event) => {
-        console.log('Speech recognition error:', event.error);
-        if (event.error === 'not-allowed') {
-            alert('Microphone access denied. Please allow microphone access to play the game.');
-        }
-    };
-    
-    gameState.recognition.onspeechstart = () => {
-        console.log('Speech started');
-        gameState.isProcessingAudio = true;
-        gameState.lastSpeechTime = Date.now();
-    };
-    
-    gameState.recognition.onspeechend = () => {
-        console.log('Speech ended');
-        gameState.lastSpeechTime = Date.now();
-    };
-    
-    gameState.recognition.onaudiostart = () => {
-        console.log('Audio capture started');
-    };
-    
-    gameState.recognition.onaudioend = () => {
-        console.log('Audio capture ended');
-        gameState.lastSpeechTime = Date.now();
-    };
-    
-    gameState.recognition.onend = () => {
-        console.log('Speech recognition ended. Timer ended:', gameState.timerEnded, 'Evaluating:', gameState.isEvaluating);
-        
-        gameState.isProcessingAudio = false;
-        
-        if (gameState.timerEnded && !gameState.isEvaluating) {
-            console.log('Recognition ended after timer - triggering final evaluation');
-            setTimeout(() => {
-                if (!gameState.isEvaluating) {
-                    finalizeAndEvaluate();
-                }
-            }, 500);
-            return;
-        }
-        
-        if (gameState.isGameActive && gameState.currentPhase === 'voice' && 
-            !gameState.timerEnded && !gameState.isEvaluating) {
-            try {
-                gameState.recognition.start();
-            } catch (e) {
-                // Already started
-            }
-        }
-    };
-    
+    // The actual initialization happens in initializeSelectedEngine()
     return true;
 }
 
@@ -532,20 +1016,35 @@ function runCountdown(callback) {
 // GAME FLOW
 // ============================================
 
-function startGame() {
+async function startGame() {
     gameState.reset();
     gameState.guessTime = parseInt(elements.guessTimeInput.value) || 3;
     gameState.voiceTime = parseInt(elements.voiceTimeInput.value) || 10;
-    gameState.isGameActive = true;
     
     elements.totalQuestions.textContent = MOVIE_QUESTIONS.length;
     elements.maxScore.textContent = MOVIE_QUESTIONS.length * 15;
+    
+    // Initialize the selected speech engine
+    const engineReady = await initializeSelectedEngine();
+    if (!engineReady) {
+        alert('Failed to initialize speech recognition. Please check your settings.');
+        return;
+    }
+    
+    gameState.isGameActive = true;
     
     // Run countdown then start
     runCountdown(() => {
         showScreen(elements.gameScreen);
         showQuestion();
     });
+}
+
+// Pre-warm the speech recognition engine to reduce initial latency
+function prewarmSpeechRecognition() {
+    // With the new engine manager, pre-warming is handled during initialization
+    // This function is kept for compatibility but does nothing now
+    console.log('Speech engine pre-warming (handled by engine manager)');
 }
 
 function showQuestion() {
@@ -599,6 +1098,10 @@ function startGuessPhase() {
         if (timeLeft <= 1) {
             elements.timer.classList.remove('warning');
             elements.timer.classList.add('danger');
+            
+            // Pre-start recognition 1 second before voice phase
+            // This allows the audio pipeline to be ready immediately
+            preStartRecognition();
         }
         
         if (timeLeft <= 0) {
@@ -606,6 +1109,24 @@ function startGuessPhase() {
             startVoicePhase();
         }
     }, 1000);
+}
+
+// Pre-start recognition before voice phase to eliminate startup latency
+function preStartRecognition() {
+    if (!speechEngine.isInitialized()) return;
+    
+    // Stop any existing session
+    speechEngine.stop();
+    
+    // Small delay then start fresh
+    setTimeout(() => {
+        try {
+            speechEngine.start();
+            console.log('Recognition pre-started for immediate voice phase');
+        } catch (e) {
+            console.log('Could not pre-start recognition:', e.message);
+        }
+    }, 100);
 }
 
 function startVoicePhase() {
@@ -633,10 +1154,13 @@ function startVoicePhase() {
     elements.timer.textContent = timeLeft;
     elements.timer.className = 'timer-value';
     
-    try {
-        gameState.recognition.start();
-    } catch (e) {
-        console.log('Recognition already started');
+    // Recognition may already be running from preStartRecognition()
+    // Only start if not already active
+    if (!speechEngine.isListening()) {
+        speechEngine.start();
+        console.log('Started recognition in voice phase');
+    } else {
+        console.log('Recognition already running (pre-started for lower latency)');
     }
     
     gameState.timerInterval = setInterval(() => {
@@ -683,48 +1207,46 @@ function handleTimerEnd() {
             
             console.log('Checking processing status - isProcessing:', gameState.isProcessingAudio, 'timeSinceSpeech:', timeSinceSpeech);
             
-            if (!gameState.isProcessingAudio && timeSinceSpeech >= 2000) {
+            // Reduced from 2000ms to 1000ms for faster finalization
+            if (!gameState.isProcessingAudio && timeSinceSpeech >= 1000) {
                 clearInterval(gameState.processingCheckInterval);
                 gameState.processingCheckInterval = null;
                 
-                try {
-                    gameState.recognition.stop();
-                } catch (e) {}
+                speechEngine.stop();
                 
+                // Reduced from 500ms to 200ms
                 setTimeout(() => {
                     if (!gameState.isEvaluating) {
                         finalizeAndEvaluate();
                     }
-                }, 500);
+                }, 200);
             }
         }, 200);
         
+        // Reduced safety timeout from 10s to 3s for faster response
         setTimeout(() => {
             if (!gameState.isEvaluating && gameState.processingCheckInterval) {
                 console.log('Safety timeout - forcing evaluation');
                 clearInterval(gameState.processingCheckInterval);
                 gameState.processingCheckInterval = null;
-                try {
-                    gameState.recognition.stop();
-                } catch (e) {}
+                speechEngine.stop();
                 setTimeout(() => {
                     if (!gameState.isEvaluating) {
                         finalizeAndEvaluate();
                     }
-                }, 500);
+                }, 300);
             }
-        }, 10000);
+        }, 3000);
     } else {
         console.log('No recent audio activity - stopping recognition');
-        try {
-            gameState.recognition.stop();
-        } catch (e) {}
+        speechEngine.stop();
         
+        // Reduced from 1500ms to 500ms for faster response
         setTimeout(() => {
             if (!gameState.isEvaluating) {
                 finalizeAndEvaluate();
             }
-        }, 1500);
+        }, 500);
     }
 }
 
@@ -762,9 +1284,7 @@ function evaluateAnswer() {
         gameState.processingCheckInterval = null;
     }
     
-    try {
-        gameState.recognition.stop();
-    } catch (e) {}
+    speechEngine.stop();
     
     const question = MOVIE_QUESTIONS[gameState.currentQuestionIndex];
     const userAnswer = gameState.recognizedText.toLowerCase().trim();
@@ -983,9 +1503,10 @@ function displayPreviousScores(scores) {
 // ============================================
 
 // Start button
-elements.startBtn.addEventListener('click', () => {
+elements.startBtn.addEventListener('click', async () => {
+    // Check if speech recognition is available
     if (initSpeechRecognition()) {
-        startGame();
+        await startGame();
     }
 });
 
@@ -1002,6 +1523,26 @@ elements.closeSettings.addEventListener('click', closeSettingsModal);
 
 // Close modal on backdrop click
 elements.settingsModal.querySelector('.modal-backdrop').addEventListener('click', closeSettingsModal);
+
+// Engine button clicks
+elements.engineBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const engine = btn.dataset.engine;
+        elements.speechEngineInput.value = engine;
+        updateEngineButtonsUI(engine);
+        
+        // Update status to show engine needs to be initialized
+        if (engine === 'vosk') {
+            if (speechEngine.engines.vosk.isInitialized) {
+                updateEngineStatus('ready', 'Vosk ready (offline)');
+            } else {
+                updateEngineStatus('', 'Vosk will load when you start');
+            }
+        } else {
+            updateEngineStatus('ready', 'Web Speech ready (online)');
+        }
+    });
+});
 
 // Save settings
 elements.saveSettings.addEventListener('click', () => {
@@ -1162,5 +1703,39 @@ function triggerConfetti() {
 
 // Load saved settings on page load
 loadSettings();
+
+// Check available engines and update status on page load
+function checkEnginesOnLoad() {
+    const hasVosk = typeof Vosk !== 'undefined';
+    const hasWebSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    
+    console.log('Available engines - Vosk:', hasVosk, ', Web Speech:', hasWebSpeech);
+    
+    const selectedEngine = elements.speechEngineInput.value || 'vosk';
+    
+    if (selectedEngine === 'vosk') {
+        if (hasVosk) {
+            updateEngineStatus('', 'Vosk will load when you start');
+        } else {
+            // Fall back to Web Speech
+            elements.speechEngineInput.value = 'webspeech';
+            updateEngineButtonsUI('webspeech');
+            if (hasWebSpeech) {
+                updateEngineStatus('ready', 'Using Web Speech (Vosk unavailable)');
+            } else {
+                updateEngineStatus('error', 'No speech engine available');
+            }
+        }
+    } else {
+        if (hasWebSpeech) {
+            updateEngineStatus('ready', 'Web Speech ready (online)');
+        } else {
+            updateEngineStatus('error', 'Web Speech not supported');
+        }
+    }
+}
+
+// Run initial check after a short delay to ensure Vosk script has loaded
+setTimeout(checkEnginesOnLoad, 500);
 
 console.log('🎬 Emoji Movie Guessing Game loaded!');
