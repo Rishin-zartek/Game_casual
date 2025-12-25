@@ -80,6 +80,10 @@ class GameState {
         this.isEvaluating = false; // Prevent multiple evaluations
         this.waitingForFinalResult = false; // Track if we're waiting for final speech result
         this.hasReceivedFinalConfirmation = false; // Track if we have full confirmation
+        this.lastSpeechTime = null; // Track when we last received speech input
+        this.isProcessingAudio = false; // Track if audio is being actively processed
+        this.timerEnded = false; // Track if the timer has ended
+        this.processingCheckInterval = null; // Interval to check if processing is complete
     }
 
     reset() {
@@ -98,9 +102,16 @@ class GameState {
         this.isEvaluating = false;
         this.waitingForFinalResult = false;
         this.hasReceivedFinalConfirmation = false;
+        this.lastSpeechTime = null;
+        this.isProcessingAudio = false;
+        this.timerEnded = false;
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
             this.timerInterval = null;
+        }
+        if (this.processingCheckInterval) {
+            clearInterval(this.processingCheckInterval);
+            this.processingCheckInterval = null;
         }
     }
 }
@@ -292,6 +303,7 @@ function initSpeechRecognition() {
     gameState.recognition.onresult = (event) => {
         let finalTranscript = '';
         let interimTranscript = '';
+        let hasInterim = false;
         
         // Accumulate ALL results to get the full transcript
         for (let i = 0; i < event.results.length; i++) {
@@ -300,8 +312,13 @@ function initSpeechRecognition() {
                 finalTranscript += transcript + ' ';
             } else {
                 interimTranscript += transcript + ' ';
+                hasInterim = true;
             }
         }
+        
+        // Track that we're receiving audio input
+        gameState.lastSpeechTime = Date.now();
+        gameState.isProcessingAudio = hasInterim; // Still processing if we have interim results
         
         // Combine final and interim to show everything the user has said
         const newText = (finalTranscript + interimTranscript).trim();
@@ -309,6 +326,8 @@ function initSpeechRecognition() {
             gameState.recognizedText = newText;
             elements.recognizedText.textContent = `"${gameState.recognizedText}"`;
         }
+        
+        console.log(`Speech result - Final: "${finalTranscript.trim()}", Interim: "${interimTranscript.trim()}", Processing: ${gameState.isProcessingAudio}`);
         
         // Check if the recognized text matches the correct answer
         if (newText && gameState.voicePhaseStartTime && !gameState.correctAnswerDetected) {
@@ -334,10 +353,51 @@ function initSpeechRecognition() {
         }
     };
     
+    // Track when speech is detected
+    gameState.recognition.onspeechstart = () => {
+        console.log('Speech started');
+        gameState.isProcessingAudio = true;
+        gameState.lastSpeechTime = Date.now();
+    };
+    
+    gameState.recognition.onspeechend = () => {
+        console.log('Speech ended');
+        // Don't immediately set isProcessingAudio to false - wait for final results
+        gameState.lastSpeechTime = Date.now();
+    };
+    
+    gameState.recognition.onaudiostart = () => {
+        console.log('Audio capture started');
+    };
+    
+    gameState.recognition.onaudioend = () => {
+        console.log('Audio capture ended');
+        // This fires when audio capture stops
+        // Mark last speech time to track when we stopped receiving audio
+        gameState.lastSpeechTime = Date.now();
+    };
+    
     gameState.recognition.onend = () => {
-        // Restart if still in voice phase and not waiting/evaluating
+        console.log('Speech recognition ended. Timer ended:', gameState.timerEnded, 'Evaluating:', gameState.isEvaluating);
+        
+        // Mark that audio processing has stopped
+        gameState.isProcessingAudio = false;
+        
+        // If timer has ended and we're waiting, now we can evaluate
+        if (gameState.timerEnded && !gameState.isEvaluating) {
+            console.log('Recognition ended after timer - triggering final evaluation');
+            // Give a small buffer then evaluate
+            setTimeout(() => {
+                if (!gameState.isEvaluating) {
+                    finalizeAndEvaluate();
+                }
+            }, 500);
+            return;
+        }
+        
+        // Restart if still in voice phase and timer hasn't ended
         if (gameState.isGameActive && gameState.currentPhase === 'voice' && 
-            !gameState.waitingForFinalResult && !gameState.isEvaluating) {
+            !gameState.timerEnded && !gameState.isEvaluating) {
             try {
                 gameState.recognition.start();
             } catch (e) {
@@ -397,6 +457,13 @@ function showQuestion() {
     gameState.isEvaluating = false;
     gameState.waitingForFinalResult = false;
     gameState.hasReceivedFinalConfirmation = false;
+    gameState.lastSpeechTime = null;
+    gameState.isProcessingAudio = false;
+    gameState.timerEnded = false;
+    if (gameState.processingCheckInterval) {
+        clearInterval(gameState.processingCheckInterval);
+        gameState.processingCheckInterval = null;
+    }
     
     // Start guess phase
     startGuessPhase();
@@ -444,6 +511,13 @@ function startVoicePhase() {
     gameState.isEvaluating = false;
     gameState.waitingForFinalResult = false;
     gameState.hasReceivedFinalConfirmation = false;
+    gameState.lastSpeechTime = null;
+    gameState.isProcessingAudio = false;
+    gameState.timerEnded = false;
+    if (gameState.processingCheckInterval) {
+        clearInterval(gameState.processingCheckInterval);
+        gameState.processingCheckInterval = null;
+    }
     let timeLeft = gameState.voiceTime;
     
     // Update UI for voice phase
@@ -485,40 +559,107 @@ function startVoicePhase() {
 
 // Handle when voice timer ends - wait for speech recognition if needed
 function handleTimerEnd() {
-    // If we've already detected a correct answer or have recognized text,
-    // wait for speech recognition to finalize
-    if (gameState.recognizedText && !gameState.isEvaluating) {
-        gameState.waitingForFinalResult = true;
-        elements.phaseText.textContent = 'Processing your answer...';
+    console.log('Timer ended. Processing audio:', gameState.isProcessingAudio, 'Last speech:', gameState.lastSpeechTime);
+    
+    // Mark that timer has ended - but DO NOT evaluate yet if still processing
+    gameState.timerEnded = true;
+    gameState.waitingForFinalResult = true;
+    elements.phaseText.textContent = 'Processing your answer...';
+    
+    // Check if we're still actively processing audio
+    // If we received speech input recently (within last 3 seconds), wait for it to finish
+    const timeSinceLastSpeech = gameState.lastSpeechTime ? (Date.now() - gameState.lastSpeechTime) : Infinity;
+    const isRecentlyActive = timeSinceLastSpeech < 3000;
+    
+    console.log('Time since last speech:', timeSinceLastSpeech, 'Recently active:', isRecentlyActive);
+    
+    if (gameState.isProcessingAudio || isRecentlyActive) {
+        console.log('Audio still being processed - waiting for recognition to complete');
         
-        // Stop recognition to force finalization
+        // Start a check interval to wait for processing to complete
+        // This will keep checking until audio processing is done
+        if (gameState.processingCheckInterval) {
+            clearInterval(gameState.processingCheckInterval);
+        }
+        
+        gameState.processingCheckInterval = setInterval(() => {
+            const now = Date.now();
+            const timeSinceSpeech = gameState.lastSpeechTime ? (now - gameState.lastSpeechTime) : Infinity;
+            
+            console.log('Checking processing status - isProcessing:', gameState.isProcessingAudio, 'timeSinceSpeech:', timeSinceSpeech);
+            
+            // Only evaluate when:
+            // 1. Not currently processing audio AND
+            // 2. It's been at least 2 seconds since last speech input (give time to finalize)
+            if (!gameState.isProcessingAudio && timeSinceSpeech >= 2000) {
+                clearInterval(gameState.processingCheckInterval);
+                gameState.processingCheckInterval = null;
+                
+                // Stop recognition to get final results
+                try {
+                    gameState.recognition.stop();
+                } catch (e) {
+                    // Already stopped
+                }
+                
+                // Give a moment for final results to come in, then evaluate
+                setTimeout(() => {
+                    if (!gameState.isEvaluating) {
+                        finalizeAndEvaluate();
+                    }
+                }, 500);
+            }
+        }, 200); // Check every 200ms
+        
+        // Safety timeout - if still processing after 10 seconds, force evaluate
+        setTimeout(() => {
+            if (!gameState.isEvaluating && gameState.processingCheckInterval) {
+                console.log('Safety timeout - forcing evaluation');
+                clearInterval(gameState.processingCheckInterval);
+                gameState.processingCheckInterval = null;
+                try {
+                    gameState.recognition.stop();
+                } catch (e) {}
+                setTimeout(() => {
+                    if (!gameState.isEvaluating) {
+                        finalizeAndEvaluate();
+                    }
+                }, 500);
+            }
+        }, 10000);
+    } else {
+        // No recent audio activity - stop recognition and evaluate after brief wait
+        console.log('No recent audio activity - stopping recognition');
         try {
             gameState.recognition.stop();
         } catch (e) {
             // Already stopped
         }
         
-        // Give speech recognition time to finalize the complete phrase
-        // Use longer delay to ensure all speech is captured
+        // The onend handler will trigger evaluation
+        // But add a fallback timeout just in case
         setTimeout(() => {
             if (!gameState.isEvaluating) {
-                gameState.waitingForFinalResult = false;
-                console.log('Evaluating with text:', gameState.recognizedText);
-                evaluateAnswer();
+                finalizeAndEvaluate();
             }
-        }, 2000); // Wait 2 seconds for complete recognition
-    } else {
-        // No recognized text, wait a moment in case speech is still being processed
-        gameState.waitingForFinalResult = true;
-        elements.phaseText.textContent = 'Listening...';
-        
-        setTimeout(() => {
-            if (!gameState.isEvaluating) {
-                gameState.waitingForFinalResult = false;
-                evaluateAnswer();
-            }
-        }, 1000);
+        }, 1500);
     }
+}
+
+// Final evaluation after all audio processing is complete
+function finalizeAndEvaluate() {
+    if (gameState.isEvaluating) return;
+    
+    console.log('Finalizing evaluation with text:', gameState.recognizedText);
+    gameState.waitingForFinalResult = false;
+    
+    // Clean up any remaining intervals
+    if (gameState.processingCheckInterval) {
+        clearInterval(gameState.processingCheckInterval);
+        gameState.processingCheckInterval = null;
+    }
+    
+    evaluateAnswer();
 }
 
 function evaluateAnswer() {
@@ -528,10 +669,20 @@ function evaluateAnswer() {
     }
     gameState.isEvaluating = true;
     
+    console.log('=== EVALUATING ANSWER ===');
+    console.log('Recognized text:', gameState.recognizedText);
+    console.log('Correct answer detected:', gameState.correctAnswerDetected);
+    
     // Clear any pending timer
     if (gameState.timerInterval) {
         clearInterval(gameState.timerInterval);
         gameState.timerInterval = null;
+    }
+    
+    // Clear processing check interval
+    if (gameState.processingCheckInterval) {
+        clearInterval(gameState.processingCheckInterval);
+        gameState.processingCheckInterval = null;
     }
     
     // Stop speech recognition
