@@ -373,7 +373,9 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
     
     async startStreamingRPC() {
         try {
-            // Use streaming recognize endpoint - this uses HTTP/2 streaming for low latency
+            // Google Cloud Speech-to-Text Streaming RPC API
+            // This uses the streamingrecognize endpoint which is the RPC method (not REST)
+            // It uses HTTP/2 streaming with newline-delimited JSON for low latency
             const url = `https://speech.googleapis.com/v1/speech:streamingrecognize?key=${encodeURIComponent(this.apiKey)}`;
             
             // Create a ReadableStream for sending audio data
@@ -505,9 +507,9 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                 if (result.alternatives && result.alternatives.length > 0) {
                     const alternative = result.alternatives[0];
                     if (alternative.transcript) {
-                        const transcript = alternative.transcript.trim();
-                        // Check if this is a final result
-                        const isFinal = result.isFinalAlternative === true || result.stability > 0.9;
+                    const transcript = alternative.transcript.trim();
+                    // Check if this is a final result
+                    const isFinal = result.isFinal === true || (result.stability !== undefined && result.stability > 0.9);
                         
                         if (transcript && this.onResult) {
                             console.log(`Google Cloud STT ${isFinal ? 'final' : 'interim'} result:`, transcript);

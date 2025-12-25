@@ -11,7 +11,7 @@ A fast-paced, voice-enabled guessing game where users interpret emojis to guess 
 
 ## ✨ Features
 
-- 🎤 **Voice Recognition**: Uses Web Speech API for real-time speech-to-text
+- 🎤 **Voice Recognition**: Uses Google Cloud Speech-to-Text RPC (Streaming) for real-time speech-to-text, with Web Speech API as fallback
 - ⏱️ **Timed Gameplay**: Configurable time limits for thinking and speaking phases
 - 🎯 **Fuzzy Matching**: Intelligent answer matching with Levenshtein distance
 - 📊 **Detailed Results**: Review your performance after each game
@@ -40,13 +40,15 @@ The game includes 10 movie questions:
 
 - A modern web browser (Chrome, Edge, or Safari recommended)
 - Microphone access for voice input
+- Google Cloud Speech-to-Text API key (get one from [Google Cloud Console](https://console.cloud.google.com/apis/credentials))
 
 ### Running the Game
 
 1. Open `index.html` in your web browser
-2. Allow microphone access when prompted
-3. Configure time settings if desired
-4. Click "Start Game" and enjoy!
+2. Click the settings icon (⚙️) and paste your Google Cloud API key
+3. Save settings and allow microphone access when prompted
+4. Configure time settings if desired
+5. Click "Start Game" and enjoy!
 
 **Quick Start with Local Server:**
 
@@ -65,8 +67,10 @@ Then open `http://localhost:8000` in your browser.
 
 ## ⚙️ Configuration
 
+- **Google Cloud API Key**: Required for Google Cloud Speech-to-Text RPC (paste in settings)
 - **Think Time**: How long you have to study the emojis (3-15 seconds)
 - **Voice Time**: How long you have to speak your answer (3-15 seconds)
+- **Speech Engine**: Choose between Google Cloud STT (RPC) or Web Speech API
 
 ## 🛠️ Technical Details
 
@@ -81,7 +85,8 @@ Then open `http://localhost:8000` in your browser.
 - **HTML5** - Semantic markup
 - **CSS3** - Flexbox, Grid, CSS Variables, Animations
 - **JavaScript (ES6+)** - Classes, Arrow functions, Template literals
-- **Web Speech API** - Speech recognition for voice input
+- **Google Cloud Speech-to-Text RPC** - Streaming RPC API for high-quality speech recognition
+- **Web Speech API** - Browser-based speech recognition (fallback option)
 
 ### Browser Compatibility
 
