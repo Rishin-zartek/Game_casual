@@ -608,9 +608,14 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
     async startStreamingRPC() {
         try {
             // Google Cloud Speech-to-Text Streaming RPC API
-            // This uses the streamingrecognize endpoint which is the RPC method (not REST)
-            // It uses HTTP/2 streaming with newline-delimited JSON for low latency
+            // Note: The streaming API requires HTTP/2 bidirectional streaming which
+            // is not fully supported by fetch() in all browsers. We'll use a workaround.
             const url = `https://speech.googleapis.com/v1/speech:streamingrecognize?key=${encodeURIComponent(this.apiKey)}`;
+            
+            // Check if ReadableStream is supported
+            if (typeof ReadableStream === 'undefined') {
+                throw new Error('ReadableStream not supported in this browser. Please use a modern browser.');
+            }
             
             // Create a ReadableStream for sending audio data
             const stream = new ReadableStream({
@@ -634,7 +639,11 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                 }
             });
             
-            // Start the streaming request with HTTP/2
+            // Start the streaming request
+            // Note: Some browsers may not support streaming with fetch()
+            // We'll try with the stream, and if it fails, provide a helpful error
+            loadingLogger.log('info', 'Initiating streaming request to Google Cloud STT...');
+            
             this.streamingRequest = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -642,37 +651,68 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                     'Accept': 'application/json',
                 },
                 body: stream,
-                // Required for streaming body requests
-                duplex: 'half',
-                // Don't cache streaming requests
                 cache: 'no-cache',
+                // Note: duplex: 'half' is experimental and not widely supported
+                // We'll try without it first
+            }).catch(error => {
+                // If fetch fails, provide a more helpful error message
+                loadingLogger.log('error', `Fetch request failed: ${error.message}`);
+                if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
+                    throw new Error('Network error: Could not connect to Google Cloud STT. This may be due to CORS restrictions or network issues. Please check your internet connection and ensure the API key is valid.');
+                }
+                throw error;
             });
             
-            if (!this.streamingRequest.ok) {
-                const errorText = await this.streamingRequest.text();
+            if (!this.streamingRequest || !this.streamingRequest.ok) {
+                const errorText = this.streamingRequest ? await this.streamingRequest.text() : 'No response';
                 let errorData;
                 try {
                     errorData = JSON.parse(errorText);
                 } catch (e) {
-                    errorData = { error: { message: errorText || `HTTP ${this.streamingRequest.status}` } };
+                    errorData = { error: { message: errorText || `HTTP ${this.streamingRequest?.status || 'unknown'}` } };
                 }
-                throw new Error(errorData.error?.message || `Streaming API error: ${this.streamingRequest.status}`);
+                const errorMsg = errorData.error?.message || `Streaming API error: ${this.streamingRequest?.status || 'unknown'}`;
+                loadingLogger.log('error', `API error: ${errorMsg}`);
+                throw new Error(errorMsg);
             }
             
             // Read responses from the stream (newline-delimited JSON)
-            this.reader = this.streamingRequest.body.getReader();
-            this.readStream();
+            if (this.streamingRequest.body && typeof this.streamingRequest.body.getReader === 'function') {
+                this.reader = this.streamingRequest.body.getReader();
+                this.readStream();
+                loadingLogger.log('success', 'Streaming connection established');
+            } else {
+                // Fallback: read response as text if streaming not supported
+                loadingLogger.log('warning', 'Streaming response body not available, reading as text');
+                const responseText = await this.streamingRequest.text();
+                const lines = responseText.split('\n').filter(line => line.trim());
+                for (const line of lines) {
+                    try {
+                        const response = JSON.parse(line);
+                        this.handleStreamResponse(response);
+                    } catch (e) {
+                        console.error('Failed to parse response:', e);
+                    }
+                }
+            }
             
         } catch (error) {
             console.error('Failed to start streaming RPC:', error);
             loadingLogger.log('error', `Streaming RPC failed: ${error.message}`);
             if (this.onError) {
+                let userFriendlyError = error.message;
+                
                 if (error.message.includes('API key') || error.message.includes('403') || error.message.includes('401')) {
-                    this.onError(new Error('Invalid API key. Please check your Google Cloud API key in settings.'));
-                } else {
-                    this.onError(error);
+                    userFriendlyError = 'Invalid API key. Please check your Google Cloud API key in settings.';
+                } else if (error.message.includes('Failed to fetch') || error.message.includes('Network error')) {
+                    userFriendlyError = 'Network error: Could not connect to Google Cloud STT. Please check your internet connection and API key.';
+                } else if (error.message.includes('CORS')) {
+                    userFriendlyError = 'CORS error: The API may not be accessible from this origin. Please check your API key and CORS settings.';
                 }
+                
+                this.onError(new Error(userFriendlyError));
             }
+            throw error;
         }
     }
     
