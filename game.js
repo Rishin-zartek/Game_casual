@@ -4,56 +4,57 @@
  */
 
 // Movie questions with emojis and acceptable answers
+// Including common phonetic variations and mishearings
 const MOVIE_QUESTIONS = [
     {
         emojis: "🦁👑🌍",
         answer: "The Lion King",
-        acceptableAnswers: ["lion king", "the lion king"]
+        acceptableAnswers: ["lion king", "the lion king", "lying king", "line king"]
     },
     {
         emojis: "🚢❄️💑💔",
         answer: "Titanic",
-        acceptableAnswers: ["titanic"]
+        acceptableAnswers: ["titanic", "titenic", "titannick", "the titanic"]
     },
     {
         emojis: "🕷️🦸‍♂️🏙️",
         answer: "Spider-Man",
-        acceptableAnswers: ["spider man", "spiderman", "spider-man"]
+        acceptableAnswers: ["spider man", "spiderman", "spider-man", "spyder man", "spider men"]
     },
     {
         emojis: "🧙‍♂️💍🌋🗡️",
         answer: "The Lord of the Rings",
-        acceptableAnswers: ["lord of the rings", "the lord of the rings", "lotr"]
+        acceptableAnswers: ["lord of the rings", "the lord of the rings", "lotr", "lord of rings", "lord of the ring"]
     },
     {
         emojis: "👻🔫👨‍🔬🏠",
         answer: "Ghostbusters",
-        acceptableAnswers: ["ghostbusters", "ghost busters"]
+        acceptableAnswers: ["ghostbusters", "ghost busters", "ghostbuster", "ghost buster", "goes busters"]
     },
     {
         emojis: "🦈🏊‍♂️🩸🏖️",
         answer: "Jaws",
-        acceptableAnswers: ["jaws"]
+        acceptableAnswers: ["jaws", "joz", "jawz", "joss"]
     },
     {
         emojis: "🧊👸❄️⛄",
         answer: "Frozen",
-        acceptableAnswers: ["frozen"]
+        acceptableAnswers: ["frozen", "froze in", "frozen movie"]
     },
     {
         emojis: "🏴‍☠️💀⚓🗺️",
         answer: "Pirates of the Caribbean",
-        acceptableAnswers: ["pirates of the caribbean", "pirates of caribbean", "pirates"]
+        acceptableAnswers: ["pirates of the caribbean", "pirates of caribbean", "pirates", "pirates caribbean", "pirate of the caribbean", "pirate caribbean"]
     },
     {
         emojis: "🤖❤️🌱🚀",
         answer: "WALL-E",
-        acceptableAnswers: ["wall-e", "walle", "wall e"]
+        acceptableAnswers: ["wall-e", "walle", "wall e", "wally", "walley", "wali", "wally e"]
     },
     {
         emojis: "🦇🃏🌃🦸",
         answer: "The Dark Knight",
-        acceptableAnswers: ["the dark knight", "dark knight", "batman"]
+        acceptableAnswers: ["the dark knight", "dark knight", "batman", "dark night", "the dark night"]
     }
 ];
 
@@ -73,6 +74,8 @@ class GameState {
         this.timerInterval = null;
         this.recognition = null;
         this.recognizedText = '';
+        this.voicePhaseStartTime = null; // Track when voice phase started
+        this.answerTime = null; // Track when answer was recognized
     }
 
     reset() {
@@ -85,10 +88,144 @@ class GameState {
         this.isGameActive = false;
         this.currentPhase = 'guess';
         this.recognizedText = '';
+        this.voicePhaseStartTime = null;
+        this.answerTime = null;
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
             this.timerInterval = null;
         }
+    }
+}
+
+// Phonetic matching algorithms
+function soundex(str) {
+    const s = str.toUpperCase().replace(/[^A-Z]/g, '');
+    if (!s) return '';
+    
+    const codes = {
+        'B': '1', 'F': '1', 'P': '1', 'V': '1',
+        'C': '2', 'G': '2', 'J': '2', 'K': '2', 'Q': '2', 'S': '2', 'X': '2', 'Z': '2',
+        'D': '3', 'T': '3',
+        'L': '4',
+        'M': '5', 'N': '5',
+        'R': '6'
+    };
+    
+    let result = s[0];
+    let prevCode = codes[s[0]] || '';
+    
+    for (let i = 1; i < s.length && result.length < 4; i++) {
+        const code = codes[s[i]] || '';
+        if (code && code !== prevCode) {
+            result += code;
+        }
+        prevCode = code || prevCode;
+    }
+    
+    return (result + '000').slice(0, 4);
+}
+
+// Double Metaphone simplified implementation for better phonetic matching
+function metaphone(str) {
+    if (!str) return '';
+    
+    let word = str.toUpperCase().replace(/[^A-Z]/g, '');
+    if (!word) return '';
+    
+    // Common phonetic transformations
+    const transforms = [
+        [/^KN|^GN|^PN|^WR|^PS/, ''],
+        [/^X/, 'S'],
+        [/^WH/, 'W'],
+        [/MB$/, 'M'],
+        [/PH/g, 'F'],
+        [/GH/g, ''],
+        [/KN/g, 'N'],
+        [/WR/g, 'R'],
+        [/CK/g, 'K'],
+        [/SCH/g, 'SK'],
+        [/TCH/g, 'CH'],
+        [/SH/g, 'X'],
+        [/CH/g, 'X'],
+        [/TH/g, '0'],
+        [/DG/g, 'J'],
+        [/C(?=[EIY])/g, 'S'],
+        [/C/g, 'K'],
+        [/Q/g, 'K'],
+        [/X/g, 'KS'],
+        [/Z/g, 'S'],
+        [/V/g, 'F'],
+        [/Y(?=[AEIOU])/g, ''],
+        [/Y/g, ''],
+        [/W(?=[AEIOU])/g, 'W'],
+        [/W/g, ''],
+        [/([AEIOU])\1+/g, '$1'],
+        [/[AEIOU]/g, '']
+    ];
+    
+    for (const [pattern, replacement] of transforms) {
+        word = word.replace(pattern, replacement);
+    }
+    
+    return word.slice(0, 6);
+}
+
+// Check if two strings sound similar
+function soundsLike(str1, str2) {
+    const s1 = str1.toLowerCase().trim();
+    const s2 = str2.toLowerCase().trim();
+    
+    // Direct match
+    if (s1 === s2) return true;
+    
+    // Soundex match
+    if (soundex(s1) === soundex(s2)) return true;
+    
+    // Metaphone match
+    if (metaphone(s1) === metaphone(s2)) return true;
+    
+    // Check individual words for multi-word strings
+    const words1 = s1.split(/\s+/);
+    const words2 = s2.split(/\s+/);
+    
+    // For single words, check phonetic similarity
+    if (words1.length === 1 && words2.length === 1) {
+        return soundex(s1) === soundex(s2) || metaphone(s1) === metaphone(s2);
+    }
+    
+    // For multi-word, check if key words match phonetically
+    const matchingWords = words1.filter(w1 => 
+        words2.some(w2 => 
+            soundex(w1) === soundex(w2) || 
+            metaphone(w1) === metaphone(w2) ||
+            w1 === w2
+        )
+    );
+    
+    // Consider a match if at least 60% of words match phonetically
+    return matchingWords.length >= Math.ceil(words1.length * 0.6);
+}
+
+// Calculate time bonus based on reaction time
+function calculateTimeBonus(reactionTimeMs, maxTimeMs) {
+    // No answer given
+    if (reactionTimeMs === null) return 0;
+    
+    const reactionTimeSec = reactionTimeMs / 1000;
+    const maxTimeSec = maxTimeMs / 1000;
+    
+    // If answered within first 25% of time, give max bonus (5 points)
+    // Linear decrease to 0 bonus at full time
+    const timeRatio = reactionTimeSec / maxTimeSec;
+    
+    if (timeRatio <= 0.25) {
+        return 5; // Max bonus for very fast answers
+    } else if (timeRatio <= 0.5) {
+        return 4; // Good bonus
+    } else if (timeRatio <= 0.75) {
+        return 2; // Small bonus
+    } else {
+        return 1; // Minimal bonus for answering at all
     }
 }
 
@@ -157,7 +294,14 @@ function initSpeechRecognition() {
             }
         }
         
-        gameState.recognizedText = finalTranscript || interimTranscript;
+        const newText = finalTranscript || interimTranscript;
+        
+        // Track when the first valid answer was detected
+        if (newText && !gameState.recognizedText && gameState.voicePhaseStartTime) {
+            gameState.answerTime = Date.now() - gameState.voicePhaseStartTime;
+        }
+        
+        gameState.recognizedText = newText;
         elements.recognizedText.textContent = `"${gameState.recognizedText}"`;
     };
     
@@ -205,7 +349,8 @@ function startGame() {
     gameState.isGameActive = true;
     
     elements.totalQuestions.textContent = MOVIE_QUESTIONS.length;
-    elements.maxScore.textContent = MOVIE_QUESTIONS.length * 10;
+    // Max score = 10 base + 5 max bonus per question
+    elements.maxScore.textContent = MOVIE_QUESTIONS.length * 15;
     
     showScreen(elements.gameScreen);
     showQuestion();
@@ -263,6 +408,8 @@ function startGuessPhase() {
 
 function startVoicePhase() {
     gameState.currentPhase = 'voice';
+    gameState.voicePhaseStartTime = Date.now();
+    gameState.answerTime = null;
     let timeLeft = gameState.voiceTime;
     
     // Update UI for voice phase
@@ -312,27 +459,54 @@ function evaluateAnswer() {
     
     const question = MOVIE_QUESTIONS[gameState.currentQuestionIndex];
     const userAnswer = gameState.recognizedText.toLowerCase().trim();
+    const maxTimeMs = gameState.voiceTime * 1000;
     
     let result = {
         emojis: question.emojis,
         correctAnswer: question.answer,
         userAnswer: gameState.recognizedText || '(no response)',
-        status: 'timeout'
+        status: 'timeout',
+        basePoints: 0,
+        timeBonus: 0,
+        totalPoints: 0,
+        reactionTime: gameState.answerTime
     };
     
     if (userAnswer) {
-        // Check if answer matches any acceptable answer
-        const isCorrect = question.acceptableAnswers.some(acceptable => 
-            userAnswer.includes(acceptable) || 
-            acceptable.includes(userAnswer) ||
-            levenshteinSimilarity(userAnswer, acceptable) > 0.7
-        );
+        // Check if answer matches any acceptable answer using multiple methods
+        const isCorrect = question.acceptableAnswers.some(acceptable => {
+            // Direct match or partial match
+            if (userAnswer.includes(acceptable) || acceptable.includes(userAnswer)) {
+                return true;
+            }
+            
+            // Levenshtein similarity (fuzzy text matching)
+            if (levenshteinSimilarity(userAnswer, acceptable) > 0.7) {
+                return true;
+            }
+            
+            // Phonetic matching (sounds similar)
+            if (soundsLike(userAnswer, acceptable)) {
+                return true;
+            }
+            
+            return false;
+        });
         
         if (isCorrect) {
             result.status = 'correct';
-            gameState.score += 10;
+            result.basePoints = 10;
+            result.timeBonus = calculateTimeBonus(gameState.answerTime, maxTimeMs);
+            result.totalPoints = result.basePoints + result.timeBonus;
+            
+            gameState.score += result.totalPoints;
             gameState.correctCount++;
-            showFeedback('correct', '✅ Correct! +10 points');
+            
+            if (result.timeBonus > 0) {
+                showFeedback('correct', `✅ Correct! +${result.basePoints} pts (+${result.timeBonus} speed bonus!)`);
+            } else {
+                showFeedback('correct', `✅ Correct! +${result.basePoints} points`);
+            }
         } else {
             result.status = 'incorrect';
             gameState.incorrectCount++;
@@ -394,17 +568,27 @@ function showFeedback(type, message) {
 function endGame() {
     gameState.isGameActive = false;
     
+    // Calculate max possible score (10 base + 5 max bonus per question)
+    const maxPossibleScore = MOVIE_QUESTIONS.length * 15;
+    
     // Update results screen
     elements.finalScore.textContent = gameState.score;
+    elements.maxScore.textContent = maxPossibleScore;
     elements.correctCount.textContent = gameState.correctCount;
     elements.incorrectCount.textContent = gameState.incorrectCount;
     elements.timeoutCount.textContent = gameState.timeoutCount;
+    
+    // Calculate total time bonus earned
+    const totalTimeBonus = gameState.results.reduce((sum, r) => sum + (r.timeBonus || 0), 0);
     
     // Performance message
     const percentage = (gameState.correctCount / MOVIE_QUESTIONS.length) * 100;
     let message = '';
     if (percentage === 100) {
         message = '🎉 Perfect score! You\'re a movie genius!';
+        if (totalTimeBonus >= MOVIE_QUESTIONS.length * 4) {
+            message += ' ⚡ Lightning fast too!';
+        }
     } else if (percentage >= 80) {
         message = '🌟 Excellent! You really know your movies!';
     } else if (percentage >= 60) {
@@ -416,20 +600,35 @@ function endGame() {
     }
     elements.performanceMessage.textContent = message;
     
-    // Build answers list
-    elements.answersList.innerHTML = gameState.results.map((result, index) => `
-        <div class="answer-item ${result.status}">
-            <span class="answer-emoji">${result.emojis}</span>
-            <div class="answer-details">
-                <div class="answer-movie">${result.correctAnswer}</div>
-                <div class="answer-given">Your answer: ${result.userAnswer}</div>
+    // Build answers list with time bonus info
+    elements.answersList.innerHTML = gameState.results.map((result, index) => {
+        const timeDisplay = result.reactionTime 
+            ? `${(result.reactionTime / 1000).toFixed(1)}s` 
+            : '-';
+        
+        const scoreDisplay = result.status === 'correct'
+            ? `<span class="answer-score">+${result.totalPoints} pts${result.timeBonus > 0 ? ` (⚡+${result.timeBonus})` : ''}</span>`
+            : '';
+        
+        const timeInfo = result.status === 'correct' && result.reactionTime
+            ? `<span class="answer-time">⏱️ ${timeDisplay}</span>`
+            : '';
+        
+        return `
+            <div class="answer-item ${result.status}">
+                <span class="answer-emoji">${result.emojis}</span>
+                <div class="answer-details">
+                    <div class="answer-movie">${result.correctAnswer}</div>
+                    <div class="answer-given">Your answer: ${result.userAnswer}</div>
+                    ${scoreDisplay} ${timeInfo}
+                </div>
+                <span class="answer-status">${
+                    result.status === 'correct' ? '✅' : 
+                    result.status === 'incorrect' ? '❌' : '⏱️'
+                }</span>
             </div>
-            <span class="answer-status">${
-                result.status === 'correct' ? '✅' : 
-                result.status === 'incorrect' ? '❌' : '⏱️'
-            }</span>
-        </div>
-    `).join('');
+        `;
+    }).join('');
     
     showScreen(elements.resultsScreen);
 }
