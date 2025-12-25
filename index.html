@@ -14,8 +14,12 @@
 <body>
     <canvas id="confetti-canvas"></canvas>
     <div class="game-container">
-        <!-- Start Screen -->
+        <!-- Start Screen / Home Page -->
         <div id="start-screen" class="screen active">
+            <button id="settings-btn" class="settings-icon-btn" aria-label="Settings">
+                ⚙️
+            </button>
+            
             <div class="hero-section">
                 <div class="logo-container">
                     <div class="logo-glow"></div>
@@ -25,12 +29,53 @@
                 <p class="tagline">Guess the movie from emojis using your voice!</p>
             </div>
             
-            <div class="settings-card">
-                <div class="settings-header">
-                    <span class="settings-icon">⚙️</span>
-                    <span>Game Settings</span>
+            <div class="rules-card">
+                <div class="rules-header">
+                    <span>📖 How to Play</span>
                 </div>
-                <div class="settings-grid">
+                <div class="rules-list">
+                    <div class="rule-item">
+                        <span class="rule-number">1</span>
+                        <span class="rule-text">Look at the emojis and think of the movie</span>
+                    </div>
+                    <div class="rule-item">
+                        <span class="rule-number">2</span>
+                        <span class="rule-text">When the mic turns on, say the movie name</span>
+                    </div>
+                    <div class="rule-item">
+                        <span class="rule-number">3</span>
+                        <span class="rule-text">Answer faster to earn bonus points!</span>
+                    </div>
+                </div>
+                <div class="scoring-info">
+                    <div class="score-item">
+                        <span class="score-emoji">✅</span>
+                        <span>Correct = 10 pts</span>
+                    </div>
+                    <div class="score-item">
+                        <span class="score-emoji">⚡</span>
+                        <span>Speed bonus up to +5 pts</span>
+                    </div>
+                </div>
+            </div>
+            
+            <button id="start-btn" class="btn primary-btn glow-btn">
+                <span class="btn-icon">🎮</span>
+                <span>Start Game</span>
+            </button>
+        </div>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>⚙️ Settings</h2>
+                    <button id="close-settings" class="close-btn">✕</button>
+                </div>
+                
+                <div class="settings-section">
+                    <h3>Game Timing</h3>
                     <div class="setting-item">
                         <div class="setting-label">
                             <span class="setting-emoji">🧠</span>
@@ -56,37 +101,27 @@
                         </div>
                     </div>
                 </div>
+                
+                <div class="settings-section danger-zone">
+                    <h3>Data Management</h3>
+                    <button id="clear-data-btn" class="btn danger-btn">
+                        <span class="btn-icon">🗑️</span>
+                        <span>Clear Scores & Cache</span>
+                    </button>
+                    <p class="hint-text">This will reset all saved scores and settings</p>
+                </div>
+                
+                <button id="save-settings" class="btn primary-btn">
+                    <span>Save Settings</span>
+                </button>
             </div>
-            
-            <button id="start-btn" class="btn primary-btn glow-btn">
-                <span class="btn-icon">🎮</span>
-                <span>Start Game</span>
-            </button>
-            
-            <div class="how-to-play">
-                <div class="how-to-header">
-                    <span>How to Play</span>
-                </div>
-                <div class="steps-container">
-                    <div class="step">
-                        <div class="step-icon">🧠</div>
-                        <p>Study the emojis</p>
-                    </div>
-                    <div class="step-arrow">→</div>
-                    <div class="step">
-                        <div class="step-icon">🎤</div>
-                        <p>Speak the answer</p>
-                    </div>
-                    <div class="step-arrow">→</div>
-                    <div class="step">
-                        <div class="step-icon">🏆</div>
-                        <p>Earn points!</p>
-                    </div>
-                </div>
-                <div class="bonus-tip">
-                    <span class="bonus-badge">⚡ TIP</span>
-                    <span>Answer faster for bonus points!</span>
-                </div>
+        </div>
+
+        <!-- Countdown Screen -->
+        <div id="countdown-screen" class="screen">
+            <div class="countdown-container">
+                <div id="countdown-number" class="countdown-number">3</div>
+                <p class="countdown-text">Get Ready!</p>
             </div>
         </div>
 
@@ -137,10 +172,11 @@
             <div class="results-content">
                 <div class="trophy">🏆</div>
                 <h2>Game Over!</h2>
+                
                 <div class="final-score">
-                    <span class="final-score-label">Final Score</span>
+                    <span class="final-score-label">Your Score</span>
                     <span id="final-score" class="final-score-value">0</span>
-                    <span class="final-score-total">/ <span id="max-score">100</span></span>
+                    <span class="final-score-total">/ <span id="max-score">150</span></span>
                 </div>
                 
                 <div class="results-breakdown">
@@ -163,13 +199,19 @@
 
                 <div class="performance-message" id="performance-message"></div>
 
+                <!-- Previous Scores Section -->
+                <div class="previous-scores-section">
+                    <h3>📊 Score History</h3>
+                    <div id="previous-scores" class="previous-scores-list"></div>
+                </div>
+
                 <div class="answers-review">
                     <h3>📋 Review Answers</h3>
                     <div id="answers-list" class="answers-list"></div>
                 </div>
 
                 <button id="play-again-btn" class="btn primary-btn">
-                    <span class="btn-icon">🔄</span>
+                    <span class="btn-icon">🏠</span>
                     Play Again
                 </button>
             </div>
