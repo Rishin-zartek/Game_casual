@@ -642,6 +642,8 @@ class GoogleCloudSpeechEngine extends SpeechEngineInterface {
                     'Accept': 'application/json',
                 },
                 body: stream,
+                // Required for streaming body requests
+                duplex: 'half',
                 // Don't cache streaming requests
                 cache: 'no-cache',
             });
