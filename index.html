@@ -14,12 +14,12 @@
 <body>
     <canvas id="confetti-canvas"></canvas>
     
-    <!-- Loading overlay for Vosk model -->
+    <!-- Loading overlay for speech engine -->
     <div id="loading-overlay" class="loading-overlay">
         <div class="loading-content">
             <div class="loading-spinner"></div>
             <h2>Loading Speech Engine</h2>
-            <p id="loading-status">Initializing Vosk...</p>
+            <p id="loading-status">Initializing speech engine...</p>
             <div class="loading-progress">
                 <div id="loading-progress-bar" class="loading-progress-bar"></div>
             </div>
@@ -111,21 +111,39 @@
                         <span>Speech Engine</span>
                     </div>
                     <div class="engine-selector">
-                        <button class="engine-btn active" data-engine="vosk">
-                            <span class="engine-icon">⚡</span>
-                            <span class="engine-name">Vosk</span>
-                            <span class="engine-desc">Offline • Fast</span>
+                        <button class="engine-btn active" data-engine="googlecloud">
+                            <span class="engine-icon">🔑</span>
+                            <span class="engine-name">Google Cloud</span>
+                            <span class="engine-desc">API Key • Accurate</span>
                         </button>
                         <button class="engine-btn" data-engine="webspeech">
                             <span class="engine-icon">☁️</span>
                             <span class="engine-name">Web Speech</span>
-                            <span class="engine-desc">Online • Accurate</span>
+                            <span class="engine-desc">Browser • Free</span>
                         </button>
                     </div>
-                    <input type="hidden" id="speech-engine" value="vosk">
+                    <input type="hidden" id="speech-engine" value="googlecloud">
                     <div id="engine-status" class="engine-status">
                         <span class="status-icon">⏳</span>
-                        <span class="status-text">Vosk model not loaded</span>
+                        <span class="status-text">Add API key to use Google Cloud STT</span>
+                    </div>
+                    
+                    <div class="api-key-section">
+                        <div class="setting-label" style="margin-top: 15px; margin-bottom: 8px;">
+                            <span class="setting-emoji">🔐</span>
+                            <span>Google Cloud API Key</span>
+                        </div>
+                        <div class="api-key-input-wrapper">
+                            <input type="password" 
+                                   id="google-api-key" 
+                                   class="api-key-input" 
+                                   placeholder="Paste your API key here..."
+                                   autocomplete="off">
+                            <button type="button" id="toggle-api-key" class="toggle-api-key-btn">👁️</button>
+                        </div>
+                        <p class="api-key-hint">
+                            Get your key from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>
+                        </p>
                     </div>
                 </div>
 
@@ -273,8 +291,6 @@
         </div>
     </div>
 
-    <!-- Vosk Speech Recognition Library -->
-    <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
     <script src="game.js"></script>
 </body>
 </html>
